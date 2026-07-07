@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  ttc-daemon:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ttc-daemon
+    ports:
+      - "8766:8766"
+    volumes:
+      - ttc-data:/data
+    env_file:
+      - ../.env.server
+    environment:
+      - TTC_DATA_DIR=/data
+      - TTC_DAEMON_HOST=0.0.0.0
+    restart: unless-stopped
+
+volumes:
+  ttc-data:

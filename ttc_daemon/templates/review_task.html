@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}审核任务 · {{ task.task_type }}{% endblock %}
+{% block content %}
+<div class="card blue">
+  <span class="tag">任务类型：{% if task.task_type == 'review' %}顾问审核{% else %}合规仲裁{% endif %}</span>
+  <span class="tag">任务 ID：{{ task.id }}</span>
+  <h2 style="margin-top:12px;">{{ payload.title | default('需要您的人工判断') }}</h2>
+  <p class="muted">Mission：{{ task.mission_id }}</p>
+</div>
+
+<div class="card">
+  <h3>待审核内容</h3>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;">{{ payload.content | default('') }}</pre>
+</div>
+
+<div class="card yellow">
+  <h3>决策</h3>
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <div class="radio-group">
+      <label><input type="radio" name="outcome" value="approved" required> 通过</label>
+      <label><input type="radio" name="outcome" value="rejected"> 驳回</label>
+      <label><input type="radio" name="outcome" value="need_more_info"> 需要补充信息</label>
+    </div>
+
+    <label for="notes">意见</label>
+    <textarea id="notes" name="notes" placeholder="写下您的判断理由或补充要求"></textarea>
+
+    <button type="submit" class="btn">提交决策</button>
+  </form>
+</div>
+{% endblock %}

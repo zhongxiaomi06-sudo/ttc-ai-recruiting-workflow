@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案二：简历含金量自动评估系统</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --card: #13131a; --border: #1e1e2e;
+    --text: #c8c8d4; --heading: #e8e8f0; --accent: #6c5ce7;
+    --accent2: #00cec9; --green: #00b894; --red: #e17055;
+    --yellow: #fdcb6e; --blue: #74b9ff;
+    --tag-bg: #1a1a2e; --code-bg: #0d0d14;
+  }
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body {
+    font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.8;
+  }
+  .hero {
+    background:linear-gradient(135deg,#0a0a1a 0%,#2e0a1a 50%,#0a1a0a 100%);
+    padding:80px 40px 60px;text-align:center;border-bottom:1px solid var(--border);
+  }
+  .hero h1 { font-size:2.4em;color:var(--heading);margin-bottom:14px;letter-spacing:1px; }
+  .hero .subtitle { font-size:1.1em;color:#8888aa;max-width:700px;margin:0 auto; }
+  .hero .tags { margin-top:22px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
+  .tag { background:var(--tag-bg);border:1px solid var(--border);padding:5px 15px;border-radius:20px;font-size:.82em;color:var(--accent2); }
+  .container { max-width:960px;margin:0 auto;padding:40px 24px 80px; }
+  h2 { color:var(--heading);font-size:1.45em;margin:50px 0 18px;padding-bottom:8px;border-bottom:2px solid var(--accent);display:inline-block; }
+  h3 { color:var(--accent2);font-size:1.12em;margin:30px 0 12px; }
+  h4 { color:var(--blue);font-size:1em;margin:20px 0 8px; }
+  p { margin:10px 0; }
+  ul,ol { margin:8px 0 8px 22px; }
+  li { margin:4px 0; }
+  table { width:100%;border-collapse:collapse;margin:14px 0;font-size:.9em; }
+  th { background:#1a1a2e;color:var(--accent2);text-align:left;padding:10px 14px;font-weight:600;border-bottom:2px solid var(--border); }
+  td { padding:9px 14px;border-bottom:1px solid var(--border); }
+  tr:hover td { background:rgba(108,92,231,.04); }
+  hr { border:none;border-top:1px solid var(--border);margin:36px 0; }
+  strong { color:var(--heading); }
+  .card { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:22px 26px;margin:16px 0; }
+  .card.idea { border-left:4px solid var(--accent2); }
+  .card.warn { border-left:4px solid var(--red); }
+  .card.ok { border-left:4px solid var(--green); }
+  .card.info { border-left:4px solid var(--blue); }
+  .card .lbl { font-size:.75em;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;font-weight:700; }
+  .card.idea .lbl { color:var(--accent2); }
+  .card.warn .lbl { color:var(--red); }
+  .card.ok .lbl { color:var(--green); }
+  .card.info .lbl { color:var(--blue); }
+
+  .score-range { display:flex;gap:6px;margin:14px 0;flex-wrap:wrap; }
+  .sr { flex:1;min-width:100px;text-align:center;padding:14px 10px;border-radius:8px; }
+  .sr .num { font-size:1.2em;font-weight:700; }
+  .sr .lbl { font-size:.72em;margin-top:4px; }
+  .sr.green { background:rgba(0,184,148,.12);border:1px solid rgba(0,184,148,.3); }
+  .sr.yellow { background:rgba(253,203,110,.1);border:1px solid rgba(253,203,110,.25); }
+  .sr.red { background:rgba(225,112,85,.1);border:1px solid rgba(225,112,85,.25); }
+  .sr.gray { background:rgba(128,128,128,.08);border:1px solid rgba(128,128,128,.2); }
+
+  .dim-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:14px 0; }
+  .dim { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 20px; }
+  .dim .dname { font-weight:700;color:var(--heading);font-size:.95em; }
+  .dim .dweight { font-size:.78em;color:var(--accent);margin:4px 0 8px; }
+  .dim ul { margin:0 0 0 16px;font-size:.85em; }
+  .dim ul li { margin:2px 0; }
+
+  .q-card { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:10px 0; }
+  .q-card .qnum { color:var(--accent);font-size:.78em;margin-bottom:4px; }
+  .q-card .qtext { font-weight:600;color:var(--heading);margin-bottom:6px; }
+  .q-card .qtip { font-size:.82em;color:#888; }
+
+  .co-tiers { display:flex;gap:12px;flex-wrap:wrap;margin:14px 0; }
+  .tier { flex:1;min-width:140px;border-radius:10px;padding:18px 16px;text-align:center; }
+  .tier.t1 { background:rgba(0,184,148,.1);border:1px solid rgba(0,184,148,.3); }
+  .tier.t2 { background:rgba(108,92,231,.08);border:1px solid rgba(108,92,231,.25); }
+  .tier.t3 { background:rgba(253,203,110,.08);border:1px solid rgba(253,203,110,.2); }
+  .tier.t4 { background:rgba(128,128,128,.06);border:1px solid rgba(128,128,128,.15); }
+  .tier .tname { font-weight:700;color:var(--heading);font-size:.95em; }
+  .tier .tinfo { font-size:.78em;color:#888;margin-top:4px;line-height:1.4; }
+
+  .arch-flow { display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:20px 0; }
+  .arch-box { background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 20px;text-align:center;min-width:120px; }
+  .arch-box .aname { font-weight:700;color:var(--heading);font-size:.9em; }
+  .arch-box .adesc { font-size:.75em;color:#888;margin-top:3px; }
+  .arch-arr { color:var(--accent);font-size:1.3em;min-width:20px;text-align:center; }
+
+  .code { background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:10px 0;overflow-x:auto;font-family:"SF Mono","Fira Code",monospace;font-size:.84em;color:var(--accent2);white-space:pre-wrap; }
+
+  .gauge { width:100%;height:8px;border-radius:4px;background:rgba(255,255,255,.06);margin:6px 0;overflow:hidden; }
+  .gauge-fill { height:100%;border-radius:4px; }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <h1>方案二：简历含金量自动评估系统</h1>
+  <p class="subtitle">解决"简历花哨但不够 solid"的推人准确率问题 — 让 AI 读懂简历的真正分量</p>
+  <div class="tags">
+    <span class="tag">深度评估</span><span class="tag">公司含金量</span>
+    <span class="tag">面试题生成</span><span class="tag">小红书分发</span>
+    <span class="tag">工程技术通用</span>
+  </div>
+</section>
+
+<div class="container">
+
+<!-- ====== 1. 核心问题定义 ====== -->
+<h2>1. 核心问题：为什么推人不准？</h2>
+
+<div class="card warn">
+  <div class="lbl">真实痛点</div>
+  <p><strong>"这个人简历看着花里胡哨的，看着也有 Agent，有创业公司，但是被创始人喷太菜。很多时候推人不准就是我把我觉得好的给客户了，不过客户是懂行的，真能看懂简历，所以他会说：做得浅，菜，不深。"</strong></p>
+</div>
+
+<h3>顾问视角 vs 客户视角的认知差</h3>
+<table>
+  <thead><tr><th>顾问看到的</th><th>客户（技术创始人/CTO）看到的</th></tr></thead>
+  <tbody>
+    <tr><td>"做过 AI Agent"</td><td>"就是个 LangChain 调包侠"</td></tr>
+    <tr><td>"在字节/阿里工作过"</td><td>"边缘部门做边缘业务，没什么含金量"</td></tr>
+    <tr><td>"创业过"</td><td>"ToVC 项目，产品没上线过"</td></tr>
+    <tr><td>"写了 5 年 Python"</td><td>"全是 CRUD，没有系统设计能力"</td></tr>
+    <tr><td>"参与过微服务改造"</td><td>"只负责了一小部分，没碰过核心链路"</td></tr>
+  </tbody>
+</table>
+
+<p><strong>本质问题：</strong> 顾问缺乏技术深度判断能力，无法识别简历中"看起来很厉害"和"真的很厉害"的差异。客户（尤其是技术创始人）能一眼看出简历的水分。</p>
+
+<div class="card info">
+  <div class="lbl">系统目标</div>
+  <p>建立一套 <strong>通用的工程技术类简历深度评分标准</strong>，不针对某个特定岗位，而是衡量候选人本身的技术深度和含金量。</p>
+</div>
+
+<!-- ====== 2. 系统架构 ====== -->
+<h2>2. 系统设计总览</h2>
+
+<div class="arch-flow">
+  <div class="arch-box"><div class="aname">简历输入</div><div class="adesc">PDF/文本 简历</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">深度评估引擎</div><div class="adesc">多维评分 + 红/黄旗</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">公司/部门含金量</div><div class="adesc">公司分级 + 部门权重</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">面试问题生成</div><div class="adesc">自动出验证题</div></div>
+</div>
+
+<div class="arch-flow">
+  <div class="arch-box"><div class="aname">综合评分报告</div><div class="adesc">多维度详细分 + 推荐建议</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">内容分发</div><div class="adesc">小红书自动发布</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">多账号管理</div><div class="adesc">账号池 + 被封轮换</div></div>
+</div>
+
+<!-- ====== 3. 深度评分模型 ====== -->
+<h2>3. 简历深度评分模型</h2>
+
+<p>不是简单的"1-5 星"，而是一个<strong>多维度细节打分体系</strong>，每个维度独立打分，最终给出综合分 + 红灯/黄灯警告。</p>
+
+<h3>评分维度详解</h3>
+
+<div class="dim-grid">
+
+<div class="dim">
+  <div class="dname">技术深度</div>
+  <div class="dweight">权重 30%</div>
+  <ul>
+    <li>是否涉及核心技术/底层系统？还是纯应用层 CRUD？</li>
+    <li>是否解决过有难度的问题（高并发、分布式、算法优化）？</li>
+    <li>是否对技术原理有深入理解，还是只会调用 API？</li>
+    <li>是否有从 0→1 的系统设计经验？</li>
+  </ul>
+</div>
+
+<div class="dim">
+  <div class="dname">项目复杂度</div>
+  <div class="dweight">权重 25%</div>
+  <ul>
+    <li>项目的真实业务规模（DAU、数据量、QPS）</li>
+    <li>是核心业务链路还是边缘辅助功能？</li>
+    <li>团队规模和在团队中的角色</li>
+    <li>项目的完整度（从设计到上线到持续迭代）</li>
+  </ul>
+</div>
+
+<div class="dim">
+  <div class="dname">工程能力</div>
+  <div class="dweight">权重 20%</div>
+  <ul>
+    <li>代码质量和工程规范意识</li>
+    <li>是否做过架构设计和重构？</li>
+    <li>CI/CD、运维、监控等工程化能力</li>
+    <li>跨团队协作和推动能力</li>
+  </ul>
+</div>
+
+<div class="dim">
+  <div class="dname">经历含金量</div>
+  <div class="dweight">权重 15%</div>
+  <ul>
+    <li>所在公司/部门的真实分量</li>
+    <li>所做业务的市场竞争力和创新性</li>
+    <li>是否有可量化的业务成果</li>
+    <li>经历的可迁移性和稀缺程度</li>
+  </ul>
+</div>
+
+<div class="dim">
+  <div class="dname">成长潜力</div>
+  <div class="dweight">权重 10%</div>
+  <ul>
+    <li>技术视野和好奇心</li>
+    <li>是否有自己的技术输出（博客/开源/演讲）</li>
+    <li>学习能力和技术迁移速度</li>
+    <li>对业务的理解深度</li>
+  </ul>
+</div>
+
+</div>
+
+<h3>综合评分与红黄旗机制</h3>
+
+<div class="score-range">
+  <div class="sr green">
+    <div class="num" style="color:var(--green)">80-100</div>
+    <div class="lbl">深度扎实 · 可重点推荐</div>
+  </div>
+  <div class="sr green">
+    <div class="num" style="color:var(--accent2)">65-79</div>
+    <div class="lbl">中上水平 · 推荐但需验证</div>
+  </div>
+  <div class="sr yellow">
+    <div class="num" style="color:var(--yellow)">45-64</div>
+    <div class="lbl">中等 · 视客户要求决定</div>
+  </div>
+  <div class="sr red">
+    <div class="num" style="color:var(--red)">25-44</div>
+    <div class="lbl">较浅 · 不推荐给高标准客户</div>
+  </div>
+  <div class="sr gray">
+    <div class="num" style="color:#888">0-24</div>
+    <div class="lbl">明显不足 · 不建议推荐</div>
+  </div>
+</div>
+
+<div class="card warn">
+  <div class="lbl">🔴 红灯信号（一票否决 / 高度警惕）</div>
+  <ul>
+    <li>所有项目都在"做功能"层面，无任何技术深度</li>
+    <li>经历中频繁换工作（平均 &lt; 1年），且每次都只是换语言/框架</li>
+    <li>夸大其词明显（如"主导"实际上是"参与"）</li>
+    <li>所有项目来自低含金量外包/系统集成公司</li>
+    <li>技能列表泛滥但无法在任何技术上深入讨论</li>
+  </ul>
+</div>
+
+<div class="card idea">
+  <div class="lbl">🟡 黄灯信号（需要重点验证的疑点）</div>
+  <ul>
+    <li>在大公司边缘部门做非核心业务</li>
+    <li>创业项目实际未上线或未获用户</li>
+    <li>项目描述用词模糊（"参与"、"协助"、"配合"过多）</li>
+    <li>技术栈跳跃过大且无关联性</li>
+    <li>开源项目 Star 数低且 commit 多为文档/格式修正</li>
+  </ul>
+</div>
+
+<!-- ====== 4. 公司/部门含金量 ====== -->
+<h2>4. 公司/部门含金量自动识别</h2>
+
+<p>客户最在意的是"你之前在什么公司、什么部门、做什么业务"，同样的公司名，不同部门的含金量天差地别。</p>
+
+<h3>公司分级体系</h3>
+
+<div class="co-tiers">
+  <div class="tier t1">
+    <div class="tname">T1 · 顶级大厂</div>
+    <div class="tinfo">Google、Meta、Apple、Microsoft<br/>Nvidia、Databricks、OpenAI<br/>学术届顶级 Lab</div>
+  </div>
+  <div class="tier t2">
+    <div class="tname">T2 · 一线大厂</div>
+    <div class="tinfo">字节、阿里、腾讯、百度<br/>快手、美团、拼多多、小红书<br/>一线 AI 公司（智谱、月之暗面等）</div>
+  </div>
+  <div class="tier t3">
+    <div class="tname">T3 · 优秀中厂</div>
+    <div class="tinfo">蔚小理、Momenta、商汤<br/>蚂蚁、京东、网易<br/>有影响力的创业公司</div>
+  </div>
+  <div class="tier t4">
+    <div class="tname">T4 · 其他</div>
+    <div class="tinfo">外包/系统集成公司<br/>小规模创业公司<br/>传统企业 IT 部门</div>
+  </div>
+</div>
+
+<h3>部门权重调节</h3>
+<p>同一家公司内，部门不同，含金量不同：</p>
+<table>
+  <thead><tr><th>公司级别</th><th>核心部门示例</th><th>边缘部门示例</th><th>含金量差距</th></tr></thead>
+  <tbody>
+    <tr><td>T1 大厂</td><td>Google Brain / Meta FAIR / OpenAI Research</td><td>Google 内部工具 / Meta 运营平台</td><td>可能差 3-5 倍</td></tr>
+    <tr><td>T2 一线厂</td><td>字节推荐算法 / 腾讯微信 / 阿里云核心</td><td>字节内部 OA / 腾讯边缘业务</td><td>可能差 2-3 倍</td></tr>
+    <tr><td>T3 中厂</td><td>蔚来自动驾驶 / Momenta 感知</td><td>车企内部管理系统</td><td>可能差 2 倍</td></tr>
+  </tbody>
+</table>
+
+<div class="card idea">
+  <div class="lbl">AI 如何自动识别？</div>
+  <ol>
+    <li><strong>公司名识别</strong>：从简历中提取工作经历，匹配公司知识库</li>
+    <li><strong>部门/业务推断</strong>：LLM 根据项目描述、技术栈、业务关键词推断所在部门性质</li>
+    <li><strong>含金量判定</strong>：综合公司级别 + 部门权重 + 所做业务 → 给出"这段经历的实际分量"</li>
+    <li><strong>行业对标</strong>：评估这段经历在目标岗位市场上的竞争力</li>
+  </ol>
+</div>
+
+<!-- ====== 5. 自动面试问题生成 ====== -->
+<h2>5. 自动面试问题生成</h2>
+
+<p>光自己判断不够，要教顾问<strong>问什么</strong>来验证候选人的真实水平。系统根据简历内容自动生成"深度验证问题"。</p>
+
+<h3>问题生成策略</h3>
+
+<div class="q-card">
+  <div class="qnum">策略 1 · 技术深度探测</div>
+  <div class="qtext">"你提到做过的 XX 系统，能讲一下当时为什么选择这个方案而不是 YY？遇到过什么 trade-off？"</div>
+  <div class="qtip">目的：区分"做过的"和"深入理解的"。能讲 trade-off 的人通常是真懂。</div>
+</div>
+
+<div class="q-card">
+  <div class="qnum">策略 2 · 项目参与度验证</div>
+  <div class="qtext">"在 XX 项目中你具体负责了哪些模块？系统整体架构是你设计的还是参与的？你能画出当时的架构图吗？"</div>
+  <div class="qtip">目的：区分"主导"和"参与"。很多简历写"主导"实际上只是改了配置。</div>
+</div>
+
+<div class="q-card">
+  <div class="qnum">策略 3 · 量化成果追问</div>
+  <div class="qtext">"你提到优化后性能提升了 30%，这个 30% 是怎么测出来的？基线是什么？样本量多大？"</div>
+  <div class="qtip">目的：区分"真数据"和"编的数据"。真正做过的人能详细解释实验设计和测量方法。</div>
+</div>
+
+<div class="q-card">
+  <div class="qnum">策略 4 · 失败经验探查</div>
+  <div class="qtext">"在做 XX 的过程中，你犯过什么技术上的错误？后来是怎么发现和修复的？"</div>
+  <div class="qtip">目的：深度浅的人说不出来。真正有经验的人对踩过的坑记忆深刻。</div>
+</div>
+
+<div class="q-card">
+  <div class="qnum">策略 5 · 公司/部门含金量验证</div>
+  <div class="qtext">"在 XX 公司/部门，你们团队的规模是多大？你的汇报关系是什么样的？业务在整个公司里是什么定位？"</div>
+  <div class="qtip">目的：判断是否边缘部门、是否真实有规模的项目经验。</div>
+</div>
+
+<div class="q-card">
+  <div class="qnum">策略 6 · 技术视野验证</div>
+  <div class="qtext">"最近你在关注什么新技术或新论文？为什么觉得这个方向有意思？如果让你落地会怎么做？"</div>
+  <div class="qtip">目的：区分"完成任务的人"和"持续成长的人"。</div>
+</div>
+
+<h3>问题生成技术方案</h3>
+<table>
+  <thead><tr><th>输入</th><th>处理</th><th>输出</th></tr></thead>
+  <tbody>
+    <tr><td>简历原文</td><td>LLM 提取所有项目的关键技术点和潜在模糊点</td><td>每个可疑点的验证问题</td></tr>
+    <tr><td>深度评分结果</td><td>根据低分维度自动加强该维度的问题覆盖</td><td>针对性的深度探测问题</td></tr>
+    <tr><td>红/黄旗标记</td><td>自动生成验证红灯信号的追问</td><td>风险验证问题</td></tr>
+    <tr><td>目标职位 JD</td><td>结合客户核心要求，生成匹配验证问题</td><td>岗位适配性问题</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 6. 小红书自动分发 ====== -->
+<h2>6. 小红书自动分发</h2>
+
+<div class="card idea">
+  <div class="lbl">目标</div>
+  <p>将深度评估后的优质候选人报告 / 职位分析 / 行业洞察，<strong>自动生成小红书内容并发布</strong>，用多个账号扩大触达面。被封了就换号。</p>
+</div>
+
+<h3>账号池策略</h3>
+
+<table>
+  <thead><tr><th>要素</th><th>策略</th></tr></thead>
+  <tbody>
+    <tr><td><strong>账号注册</strong></td><td>批量注册多账号（不同手机号/不同设备指纹），每个账号独立 IP</td></tr>
+    <tr><td><strong>养号策略</strong></td><td>每个账号先养 1-2 周：浏览、点赞、收藏相关领域内容，模拟正常用户行为</td></tr>
+    <tr><td><strong>内容方向</strong></td><td>"AI 行业薪资揭秘"、"TTC 数据中的热门岗位"、"技术面试高频考点"等</td></tr>
+    <tr><td><strong>发布频率</strong></td><td>每账号每天 1-2 篇，轮流发布，避免单账号过于活跃</td></tr>
+    <tr><td><strong>封号应对</strong></td><td>账号被封 → 自动切换下一个 → 被封账号标记冷却 → N天后尝试恢复或废弃</td></tr>
+    <tr><td><strong>内容质量</strong></td><td>AI 搜索最新行业动态，结合 TTC 内部数据，生成有信息增量的小红书体内容</td></tr>
+  </tbody>
+</table>
+
+<h3>内容生成 Pipeline</h3>
+<div class="arch-flow">
+  <div class="arch-box"><div class="aname">数据源</div><div class="adesc">TTC内部数据<br/>行业新闻<br/>职位趋势</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">内容生成</div><div class="adesc">LLM生成<br/>小红书风格<br/>+ 配图提示词</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">排期调度</div><div class="adesc">多账号轮换<br/>时间随机化<br/>频率控制</div></div>
+  <div class="arch-arr">→</div>
+  <div class="arch-box"><div class="aname">自动发布</div><div class="adesc">模拟操作<br/>或 API 发布<br/>+ 状态监控</div></div>
+</div>
+
+<!-- ====== 7. 技术实现路径 ====== -->
+<h2>7. 技术实现路径</h2>
+
+<div class="phase-grid">
+<div class="phase">
+  <div class="num">Phase 1 · 1-2 个月</div>
+  <h4>简历深度评分引擎</h4>
+  <ul>
+    <li>LLM 解析 PDF/文本简历 → 结构化</li>
+    <li>构建多维评分 Prompt 体系</li>
+    <li>公司/部门含金量数据库建设</li>
+    <li>红黄旗规则引擎开发</li>
+    <li>评分结果可视化</li>
+  </ul>
+</div>
+<div class="phase">
+  <div class="num">Phase 2 · 1 个月</div>
+  <h4>面试问题自动生成</h4>
+  <ul>
+    <li>基于评分结果的问题模板</li>
+    <li>简历疑点自动识别 + 追问生成</li>
+    <li>问题库持续积累和优化</li>
+    <li>顾问反馈闭环（问题有效/无效）</li>
+  </ul>
+</div>
+<div class="phase">
+  <div class="num">Phase 3 · 1-2 个月</div>
+  <h4>小红书分发系统</h4>
+  <ul>
+    <li>多账号管理后台</li>
+    <li>AI 内容生成（小红书风格）</li>
+    <li>自动发布 + 封号监测</li>
+    <li>账号池轮换策略</li>
+  </ul>
+</div>
+<div class="phase">
+  <div class="num">Phase 4 · 持续迭代</div>
+  <h4>模型优化 + 数据飞轮</h4>
+  <ul>
+    <li>用客户反馈（"菜/不深" vs "不错"）校准评分</li>
+    <li>公司含金量数据库持续更新</li>
+    <li>面试问题有效性分析</li>
+    <li>推人准确率持续提升</li>
+  </ul>
+</div>
+</div>
+
+<!-- ====== 8. 关键技术选型 ====== -->
+<h2>8. 关键技术选型</h2>
+
+<table>
+  <thead><tr><th>模块</th><th>技术方案</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><strong>简历解析</strong></td><td>LLM (GPT-4o / Claude) + 非结构化文档解析 (Unstructured/PyPDF)</td><td>支持 PDF/Word/图片 等多格式</td></tr>
+    <tr><td><strong>深度评分</strong></td><td>LLM + 多步 Chain-of-Thought Prompting</td><td>分维度 + 红黄旗 + 综合分，输出结构化 JSON</td></tr>
+    <tr><td><strong>公司含金量</strong></td><td>知识图谱 + LLM 补充判断</td><td>结构化公司-部门-业务含金量数据，LLM 补充未知公司</td></tr>
+    <tr><td><strong>面试题生成</strong></td><td>LLM + RAG（检索历史有效题库）</td><td>根据简历疑点 + 岗位需求定向生成</td></tr>
+    <tr><td><strong>小红书发布</strong></td><td>Playwright/Selenium 模拟操作 或 小红书开放 API</td><td>多账号管理，模拟正常用户行为</td></tr>
+    <tr><td><strong>账号管理</strong></td><td>数据库 + 状态机</td><td>账号状态（正常/受限/被封/冷却）+ 发布频率控制</td></tr>
+    <tr><td><strong>前后端</strong></td><td>Python FastAPI + React</td><td>简历上传 → 评分报告展示 → 面试题导出</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 9. 评分报告输出格式 ====== -->
+<h2>9. 评分报告输出示例</h2>
+
+<div class="code">
+{
+  "candidate": "张三",
+  "overall_score": 62,
+  "level": "中上",
+  "dimensions": {
+    "tech_depth": { "score": 45, "comment": "项目集中在应用层开发，缺乏系统级或算法级深度" },
+    "project_complexity": { "score": 60, "comment": "有中等规模项目经验，但未涉及高并发或大数据场景" },
+    "engineering": { "score": 70, "comment": "有 CI/CD 和监控经验，工程规范较好" },
+    "experience_quality": { "score": 55, "comment": "字节工作但所在部门偏边缘，所做业务非核心" },
+    "growth_potential": { "score": 68, "comment": "有持续学习习惯，技术视野尚可" }
+  },
+  "red_flags": [
+    "字节经历在边缘业务部门"
+  ],
+  "yellow_flags": [
+    "项目描述中'参与'、'协助'出现频率高",
+    "缺乏核心系统设计经验"
+  ],
+  "company_analysis": {
+    "company_history": [
+      { "name": "字节跳动", "tier": "T2", "dept_weight": "低",
+        "assessment": "边缘部门，所做业务非公司核心营收来源" }
+    ]
+  },
+  "verification_questions": [
+    "在字节你负责的模块在整个系统里是什么位置？你的工作直接影响到哪些业务指标？",
+    "你提到做了 XX 系统的优化，如果没有你做这个优化，业务会出现什么问题？"
+  ],
+  "recommendation": "中等偏上，不建议推荐给要求技术深度极高的客户。适合标准开发的职位。",
+  "score_breakdown_url": "https://..."
+}
+</div>
+
+<!-- ====== 10. 核心价值 ====== -->
+<h2>10. 核心价值</h2>
+
+<div class="card idea">
+  <div class="lbl">核心价值总结</div>
+  <ol>
+    <li><strong>提高推人准确率</strong>：在推荐之前就识别出"花哨但不够 solid"的候选人，减少客户"喷菜"的概率</li>
+    <li><strong>教顾问成长</strong>：不是只给一个分，还告诉顾问"怎么看"和"怎么问"</li>
+    <li><strong>建立共同语言</strong>：顾问和客户用同一套深度标准对话，减少认知偏差</li>
+    <li><strong>数据沉淀</strong>：每次客户反馈（"菜"/"不深"/"不错"）反哺评分模型持续校准</li>
+    <li><strong>内容引流</strong>：优质简历深度分析自动分发到小红书，扩大品牌影响力</li>
+  </ol>
+</div>
+
+</div>
+
+<style>
+  .phase-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0; }
+  .phase { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 20px; }
+  .phase .num { font-size:.72em;color:var(--accent);margin-bottom:5px; }
+  .phase h4 { margin-top:0; }
+</style>
+
+</body>
+</html>

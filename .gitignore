@@ -1,0 +1,48 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.log
+
+# Local environments
+venv/
+.venv/
+env/
+.env
+.env.*
+!.env.server.example
+
+# Runtime data and databases
+data/
+ttc_daemon/data/
+candidate-collector/data/
+server-data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Private documents, resumes, and generated auth images
+简历数据/
+*.pdf
+*.doc
+*.docx
+*.dmg
+auth_qrcode.png
+lark_auth*.png
+mail_auth.png
+miaoda_auth.png
+Clash订阅链接.webloc
+
+# Local/third-party workspaces not part of this repo
+.claude/
+MarkSnip/
+feishu-toolkit/
+rl_resume_data/
+rl_resume_data_jd_aligned/
+rl_resume_data_true_four/
+
+# Secrets and keys
+*.pem
+*.key
+*.p12
+*.pfx
+mysql.env

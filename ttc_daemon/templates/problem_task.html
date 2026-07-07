@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}AI 遇到问题 · 需要人工处理{% endblock %}
+{% block content %}
+<div class="card red">
+  <span class="tag">AI 异常 / 信息缺失</span>
+  <span class="tag">任务类型：{{ task.task_type }}</span>
+  <h2 style="margin-top:12px;">AI 在“{{ payload.resume_state | default('未知') }}”步骤遇到了问题</h2>
+  <p class="muted">Mission：{{ task.mission_id }} · 任务 ID：{{ task.id }}</p>
+</div>
+
+<div class="card">
+  <h3>问题描述</h3>
+  <p style="font-size:1.05em;color:var(--heading);">{{ payload.problem | default('未提供具体问题') }}</p>
+</div>
+
+{% if payload.jd_record %}
+<div class="card">
+  <h3>相关 JD</h3>
+  <p><strong>{{ payload.jd_record.title | default('无标题') }}</strong></p>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;max-height:300px;overflow:auto;">{{ payload.jd_record.raw_text | default('') }}</pre>
+</div>
+{% endif %}
+
+{% if payload.candidate %}
+<div class="card">
+  <h3>相关候选人</h3>
+  <p><strong>{{ payload.candidate.name | default('未命名') }}</strong> · 匹配度 {{ payload.candidate.overall_score | default('未评分') }}</p>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;">{{ payload.candidate.raw_profile | default({}) | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+
+{% if payload.jd_fields %}
+<div class="card">
+  <h3>当前解析出的 JD 字段</h3>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;">{{ payload.jd_fields | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+
+<div class="card yellow">
+  <h3>请人工介入</h3>
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <label>处理方式</label>
+    <div class="radio-group">
+      <label><input type="radio" name="outcome" value="resolved" required> 已解决，AI 可继续</label>
+      <label><input type="radio" name="outcome" value="cannot_resolve"> 无法解决，终止该 Mission</label>
+    </div>
+
+    {% if task.task_type in ['empty_content', 'read_failed', 'login_required'] %}
+    <label for="replacement_url">替代 URL（可选）</label>
+    <input id="replacement_url" name="replacement_url" type="text" value="{{ payload.source_url | default('') }}" placeholder="https://...">
+
+    <label for="manual_text">人工补充正文（可选）</label>
+    <textarea id="manual_text" name="manual_text" placeholder="如果页面无法读取，把可用于分类/解析的正文粘贴在这里"></textarea>
+    {% endif %}
+
+    {% if task.task_type == 'classify_uncertain' %}
+    <label for="artifact_type">人工确认内容类型</label>
+    <select id="artifact_type" name="artifact_type">
+      <option value="jd">JD</option>
+      <option value="candidate">候选人</option>
+      <option value="evidence">证据页</option>
+      <option value="chat">聊天记录</option>
+      <option value="unknown">未知</option>
+    </select>
+
+    <label for="confidence">人工置信度</label>
+    <input id="confidence" name="confidence" type="number" min="0" max="1" step="0.05" value="1">
+    {% endif %}
+
+    {% if task.task_type == 'jd_clarify' %}
+    <label for="position">岗位名称</label>
+    <input id="position" name="position" type="text" value="{{ payload.jd_fields.position | default('') }}">
+
+    <label for="location">地点</label>
+    <input id="location" name="location" type="text" value="{{ payload.jd_fields.location | default('') }}">
+
+    <label for="salary">薪资</label>
+    <input id="salary" name="salary" type="text" value="{{ payload.jd_fields.salary | default('') }}">
+
+    <label for="skills">硬技能 / 关键词（逗号分隔）</label>
+    <input id="skills" name="skills" type="text" value="{{ payload.jd_fields.skills | default([]) | join(', ') }}">
+
+    <label for="target_companies">目标公司 / 对标公司（逗号分隔）</label>
+    <input id="target_companies" name="target_companies" type="text" value="{{ payload.jd_fields.target_companies | default([]) | join(', ') }}">
+    {% endif %}
+
+    <label for="notes">处理说明</label>
+    <textarea id="notes" name="notes" placeholder="说明你补充了什么，或为什么无法解决"></textarea>
+
+    <button type="submit" class="btn">提交并继续</button>
+  </form>
+</div>
+{% endblock %}

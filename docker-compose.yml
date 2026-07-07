@@ -1,0 +1,11 @@
+services:
+  ttc-daemon:
+    build: .
+    container_name: ttc-daemon
+    restart: unless-stopped
+    env_file:
+      - .env.server
+    ports:
+      - "8766:8766"
+    volumes:
+      - ./server-data:/data

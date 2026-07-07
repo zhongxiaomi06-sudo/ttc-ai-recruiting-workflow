@@ -1,0 +1,16 @@
+[Unit]
+Description=TTC Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ttc-system
+EnvironmentFile=/opt/ttc-system/.env.server
+ExecStart=/opt/ttc-system/venv/bin/python ttc_daemon.py
+Restart=always
+RestartSec=5
+User=ttc
+Group=ttc
+
+[Install]
+WantedBy=multi-user.target

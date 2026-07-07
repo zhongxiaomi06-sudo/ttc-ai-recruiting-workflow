@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}打电话任务 · {{ payload.candidate.name | default('候选人') }}{% endblock %}
+{% block content %}
+<div class="card green">
+  <div class="section">
+    <span class="tag">任务类型：猎头打电话</span>
+    <span class="tag">优先级：{{ payload.priority }}</span>
+  </div>
+  <h2>{{ payload.candidate.name | default('候选人') }}</h2>
+  <p class="muted">任务 ID：{{ task.id }} · Mission：{{ task.mission_id }}</p>
+
+  <div class="section">
+    <div class="section-title">匹配度</div>
+    <div class="score">{{ payload.candidate.overall_score | default('未评分') }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>目标岗位</h3>
+  <p><strong>{{ (payload.jd_record | default({})).get('title', '未知 JD') }}</strong></p>
+  <p class="muted">{{ ((payload.jd_record | default({})).get('raw_text', '')[:400]) }}…</p>
+</div>
+
+<div class="card">
+  <h3>电话话术</h3>
+  <div class="section" style="background:#0d0d14;padding:14px;border-radius:6px;">
+    {{ payload.call_script }}
+  </div>
+</div>
+
+<div class="card">
+  <h3>要点提示</h3>
+  <ul>
+    {% for point in payload.talking_points %}
+    <li>{{ point }}</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="card">
+  <h3>证据链</h3>
+  {% if payload.evidence %}
+  <ul>
+    {% for ev in payload.evidence %}
+    <li>
+      <strong>{{ ev.field | default('证据') }}</strong>
+      {% if ev.source_url %}（<a href="{{ ev.source_url }}" target="_blank">来源</a>）{% endif %}
+      <br><span class="muted">{{ ev.raw_text | default('') }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">暂无结构化证据。</p>
+  {% endif %}
+</div>
+
+<div class="card yellow">
+  <h3>反馈</h3>
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <label>通话结果</label>
+    <div class="radio-group">
+      <label><input type="radio" name="outcome" value="interested" required> 有意向</label>
+      <label><input type="radio" name="outcome" value="not_interested"> 无兴趣</label>
+      <label><input type="radio" name="outcome" value="no_answer"> 未接通</label>
+      <label><input type="radio" name="outcome" value="wrong_info"> 信息有误</label>
+    </div>
+
+    <label for="notes">备注</label>
+    <textarea id="notes" name="notes" placeholder="记录候选人反馈、可面试时间、薪资期望等"></textarea>
+
+    <button type="submit" class="btn">提交反馈</button>
+  </form>
+</div>
+{% endblock %}

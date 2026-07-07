@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}TTC 工作流 · 测试控制台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>TTC 工作流 · 测试控制台</h1>
+  <p class="muted">
+    在这里快速提交真实输入，观察 AI 自动推进 Mission 和生成人类任务。
+    生产环境请关闭此页面或加上访问控制。
+  </p>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>1. 提交网页 / ChatGPT 链接</h3>
+    <form action="/ingest/read-link" method="get">
+      <label for="url">URL</label>
+      <input id="url" name="url" type="url" placeholder="https://chatgpt.com/share/..." required>
+      <button type="submit" class="btn">创建 read_job</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>2. 提交 JD / 飞书文本</h3>
+    <form action="/ingest/feishu" method="post" id="feishu-form">
+      <label for="source_type">来源类型</label>
+      <select id="source_type" name="source_type">
+        <option value="feishu_docx">feishu_docx</option>
+        <option value="feishu_wiki">feishu_wiki</option>
+        <option value="feishu_chat">feishu_chat</option>
+        <option value="manual_jd">manual_jd</option>
+      </select>
+      <label for="title">标题（可选）</label>
+      <input id="title" name="title" type="text" placeholder="某 AI 公司后端负责人 JD">
+      <label for="raw_text">正文</label>
+      <textarea id="raw_text" name="raw_text" rows="6" placeholder="粘贴 JD 或飞书文档正文" required></textarea>
+      <button type="submit" class="btn">提交</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>3. 提交候选人 JSON</h3>
+    <form action="/ingest/resume" method="post" id="resume-form">
+      <label for="resume-json">候选人 JSON</label>
+      <textarea id="resume-json" name="candidate" rows="8" required>{
+  "name": "张三",
+  "phone": "13800000000",
+  "email": "zhangsan@example.com",
+  "skills": ["Python", "LLM", "Kubernetes"],
+  "current_company": "某大厂",
+  "current_title": "AI Infra 工程师"
+}</textarea>
+      <button type="submit" class="btn">提交</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h3>4. 查看最新状态</h3>
+  <p><a class="btn" href="/dashboard" target="_blank">打开 Dashboard</a>
+  <a class="btn" href="/api/call-list" target="_blank">查看电话清单</a>
+  <a class="btn" href="/human/tasks" target="_blank">查看人类任务</a></p>
+  <p class="muted">调度器每 10 秒 tick 一次；提交后稍等再刷新 Dashboard。</p>
+</div>
+
+<script>
+  // 让表单以 JSON 提交 resume
+  document.getElementById('resume-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const textarea = document.getElementById('resume-json');
+    try {
+      JSON.parse(textarea.value);
+    } catch (err) {
+      alert('JSON 格式错误：' + err.message);
+      return;
+    }
+    fetch('/ingest/resume', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({candidate: JSON.parse(textarea.value)})
+    }).then(r => r.json()).then(data => {
+      alert('已提交：' + JSON.stringify(data, null, 2));
+    }).catch(err => alert('提交失败：' + err));
+  });
+
+  // 让 feishu-form 以 JSON 提交
+  document.getElementById('feishu-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {};
+    fd.forEach((v, k) => body[k] = v);
+    fetch('/ingest/feishu', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-TTC-Token': ''
+      },
+      body: JSON.stringify(body)
+    }).then(r => r.json()).then(data => {
+      alert('已提交：' + JSON.stringify(data, null, 2));
+    }).catch(err => alert('提交失败：' + err));
+  });
+</script>
+
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }
+  label { display: block; margin: 10px 0 4px; color: var(--heading); font-size: .9em; }
+  input, select, textarea { width: 100%; padding: 8px 10px; background: #0d0d14; border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+  .btn { margin-right: 8px; }
+</style>
+{% endblock %}

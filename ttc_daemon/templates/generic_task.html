@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}任务详情{% endblock %}
+{% block content %}
+<div class="card">
+  <span class="tag">任务类型：{{ task.task_type }}</span>
+  <h2 style="margin-top:12px;">人工任务</h2>
+  <p class="muted">{{ task.id }}</p>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;">{{ payload | tojson(indent=2) }}</pre>
+
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <label for="outcome">结果</label>
+    <input type="text" id="outcome" name="outcome" required>
+
+    <label for="notes">备注</label>
+    <textarea id="notes" name="notes"></textarea>
+
+    <button type="submit" class="btn">提交</button>
+  </form>
+</div>
+{% endblock %}

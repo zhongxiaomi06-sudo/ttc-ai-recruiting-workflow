@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案一：招聘量化决策系统 (Recruiting Quant OS)</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --card: #13131a; --border: #1e1e2e;
+    --text: #c8c8d4; --heading: #e8e8f0; --accent: #6c5ce7;
+    --accent2: #00cec9; --green: #00b894; --red: #e17055;
+    --yellow: #fdcb6e; --blue: #74b9ff;
+    --tag-bg: #1a1a2e; --code-bg: #0d0d14;
+  }
+  * { margin:0;padding:0;box-sizing:border-box; }
+  body {
+    font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.8;
+  }
+  .hero {
+    background:linear-gradient(135deg,#0a0a1a 0%,#1a0a2e 50%,#0a1a2e 100%);
+    padding:80px 40px 60px;text-align:center;border-bottom:1px solid var(--border);
+  }
+  .hero h1 { font-size:2.4em;color:var(--heading);margin-bottom:14px;letter-spacing:1px; }
+  .hero .subtitle { font-size:1.1em;color:#8888aa;max-width:700px;margin:0 auto; }
+  .hero .tags { margin-top:22px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap; }
+  .tag { background:var(--tag-bg);border:1px solid var(--border);padding:5px 15px;border-radius:20px;font-size:.82em;color:var(--accent2); }
+  .container { max-width:960px;margin:0 auto;padding:40px 24px 80px; }
+  h2 { color:var(--heading);font-size:1.45em;margin:50px 0 18px;padding-bottom:8px;border-bottom:2px solid var(--accent);display:inline-block; }
+  h3 { color:var(--accent2);font-size:1.12em;margin:30px 0 12px; }
+  h4 { color:var(--blue);font-size:1em;margin:20px 0 8px; }
+  p { margin:10px 0; }
+  ul,ol { margin:8px 0 8px 22px; }
+  li { margin:4px 0; }
+  table { width:100%;border-collapse:collapse;margin:14px 0;font-size:.9em; }
+  th { background:#1a1a2e;color:var(--accent2);text-align:left;padding:10px 14px;font-weight:600;border-bottom:2px solid var(--border); }
+  td { padding:9px 14px;border-bottom:1px solid var(--border); }
+  tr:hover td { background:rgba(108,92,231,.04); }
+  hr { border:none;border-top:1px solid var(--border);margin:36px 0; }
+  strong { color:var(--heading); }
+  .inline { background:var(--code-bg);padding:1px 6px;border-radius:4px;font-family:"SF Mono","Fira Code",monospace;font-size:.85em; }
+  .card { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:22px 26px;margin:16px 0; }
+  .card.idea { border-left:4px solid var(--accent2); }
+  .card.warn { border-left:4px solid var(--red); }
+  .card.ok { border-left:4px solid var(--green); }
+  .card.info { border-left:4px solid var(--blue); }
+  .card .lbl { font-size:.75em;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;font-weight:700; }
+  .card.idea .lbl { color:var(--accent2); }
+  .card.warn .lbl { color:var(--red); }
+  .card.ok .lbl { color:var(--green); }
+  .card.info .lbl { color:var(--blue); }
+
+  .arch { display:flex;flex-direction:column;align-items:center;gap:8px;margin:20px 0; }
+  .arch-row { display:flex;gap:10px;flex-wrap:wrap;justify-content:center; }
+  .arch-node { background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 20px;text-align:center;min-width:130px; }
+  .arch-node .lyr { font-size:.72em;color:#666;letter-spacing:1px; }
+  .arch-node .nm { font-weight:700;color:var(--heading);margin-top:3px; }
+  .arch-arr { color:var(--accent);font-size:1.2em;text-align:center;margin:2px 0; }
+
+  .phase-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0; }
+  .phase { background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 20px; }
+  .phase .num { font-size:.72em;color:var(--accent);margin-bottom:5px; }
+  .phase h4 { margin-top:0; }
+
+  .st-diagram { display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;margin:18px 0; }
+  .st { background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-align:center;min-width:90px; }
+  .st .lv { font-size:.72em;color:var(--accent); }
+  .st .dc { font-weight:600;color:var(--heading);margin-top:2px; }
+  .st-arr { color:var(--accent);font-size:1.1em; }
+
+  .code { background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 18px;margin:10px 0;overflow-x:auto;font-family:"SF Mono","Fira Code",monospace;font-size:.84em;color:var(--accent2);white-space:pre-wrap; }
+
+  .score-bar { display:flex;border-radius:8px;overflow:hidden;height:24px;margin:10px 0; }
+  .score-bar span { display:flex;align-items:center;justify-content:center;font-size:.72em;font-weight:700;color:#fff; }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <h1>方案一：招聘量化决策系统</h1>
+  <p class="subtitle">Recruiting Quant OS — 将猎头业务从"人肉经验驱动"升级为"数据+AI驱动的量化投资模型"</p>
+  <div class="tags">
+    <span class="tag">量化决策</span><span class="tag">AI Agent</span>
+    <span class="tag">工作流自动化</span><span class="tag">仓位管理</span>
+    <span class="tag">闪电战引擎</span><span class="tag">人机协作</span>
+  </div>
+</section>
+
+<div class="container">
+
+<!-- ====== 1. 核心类比 ====== -->
+<h2>1. 核心类比：主观猎头 → 量化基金</h2>
+
+<p>每个顾问一周工作 <strong>50 小时 = 50 个单位的"投资预算"</strong>。猎头本质上不是"找人"，而是做投资决策——把有限的资金投向哪些公司、哪些职位。</p>
+
+<div class="card idea">
+  <div class="lbl">顾问的 5 步投资决策链</div>
+  <ol>
+    <li><strong>了解公司</strong>：新职位出现 → 花 5-10 分钟了解公司背景</li>
+    <li><strong>决定是否投入</strong>：判断这个客户/职位值不值得花时间</li>
+    <li><strong>快速推荐（建仓）</strong>：花 1-2 小时搜人，推 3 个人</li>
+    <li><strong>等待反馈</strong>：推出去后，等待客户反应</li>
+    <li><strong>追加投入（加仓）</strong>：反馈快、面试率高 → 继续加时间</li>
+  </ol>
+</div>
+
+<table>
+  <thead><tr><th>传统顾问（散户 / 主观投资）</th><th>量化决策系统（对冲基金 / 量化投资）</th></tr></thead>
+  <tbody>
+    <tr><td>顾问自己判断客户好不好</td><td>系统根据历史数据 + 实时反馈打分</td></tr>
+    <tr><td>依赖个人经验和直觉</td><td>规则 + 模型驱动，稳定可复制</td></tr>
+    <tr><td>难以规模化</td><td>批量推进标准化职位，地毯式覆盖</td></tr>
+    <tr><td>一个人盯不了太多职位</td><td>系统同时监听、评估、执行大量职位</td></tr>
+    <tr><td>决策靠主观感觉</td><td>信号回测 + A/B 迭代 + 策略库沉淀</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 2. 系统定位 ====== -->
+<h2>2. 系统定位</h2>
+
+<div class="card info">
+  <div class="lbl">核心命题</div>
+  <p><strong>在有限的人力、时间和数据资源下，如何最大化推荐量 → 面试量 → Offer 量 → 成交量？</strong></p>
+</div>
+
+<p>这不是一个"AI 搜人工具"，而是一套 <strong>招聘量化投资操作系统</strong>。核心价值：</p>
+<ol>
+  <li>自动发现职位机会</li>
+  <li>自动判断职位是否值得投入</li>
+  <li>自动搜人 + 生成推荐列表</li>
+  <li>自动分配任务给顾问</li>
+  <li>根据客户反馈<strong>动态加仓 / 减仓 / 止损</strong></li>
+  <li>标准化职位批量化、地毯式推进</li>
+  <li>人类释放到高价值判断、沟通、谈判</li>
+</ol>
+
+<!-- ====== 3. 适用范围 ====== -->
+<h2>3. 系统适用范围</h2>
+
+<div class="card ok">
+  <div class="lbl">适合机器处理的岗位</div>
+  <ul>
+    <li>工程师类（后端/前端/测试/数据/算法）</li>
+    <li>产品经理类</li>
+    <li>AI 产品岗位</li>
+    <li>年薪 30万-100万 的标准化职位</li>
+    <li>需求明确、人才池充足的通用职位</li>
+    <li>客户反馈速度较快的职位</li>
+  </ul>
+</div>
+
+<div class="card warn">
+  <div class="lbl">不适合完全交给机器的岗位</div>
+  <ul>
+    <li>高阶管理岗位 / 创始团队核心岗位</li>
+    <li>极度非标的人才需求</li>
+    <li>冰山下候选人较多、线上数据不足的职位</li>
+    <li>需要深度说服、战略沟通、复杂谈判的职位</li>
+  </ul>
+</div>
+
+<p><strong>逻辑：能机器完成的 → 不让人类做；必须人类做的 → 系统派发清晰任务。</strong></p>
+
+<!-- ====== 4. 系统架构总览 ====== -->
+<h2>4. 系统架构总览</h2>
+<p>五层闭环架构："感知 → 评估 → 执行 → 反馈 → 学习"</p>
+
+<div class="arch">
+  <div class="arch-node"><div class="lyr">Layer 5</div><div class="nm">学习层：策略复盘 & 模型迭代 & 知识沉淀</div></div>
+  <div class="arch-arr">▲</div>
+  <div class="arch-node"><div class="lyr">Layer 4</div><div class="nm">反馈层：反馈追踪 & 动态仓位管理（加仓/减仓/止损）</div></div>
+  <div class="arch-arr">▲</div>
+  <div class="arch-node"><div class="lyr">Layer 3</div><div class="nm">执行层：自动Sourcing & 推荐列表 & 任务派发 & 闪电战引擎</div></div>
+  <div class="arch-arr">▲</div>
+  <div class="arch-node"><div class="lyr">Layer 2</div><div class="nm">评估层：客户&职位&供给三维评分 & 综合仓位决策</div></div>
+  <div class="arch-arr">▲</div>
+  <div class="arch-node"><div class="lyr">Layer 1</div><div class="nm">感知层：群消息监听 & JD解析 & 公司补全 & 事件生成</div></div>
+  <div class="arch-arr">▲</div>
+  <div class="arch-row">
+    <div class="arch-node"><div class="lyr">数据层</div><div class="nm">群消息</div></div>
+    <div class="arch-node"><div class="lyr">数据层</div><div class="nm">CRM/ATS</div></div>
+    <div class="arch-node"><div class="lyr">数据层</div><div class="nm">Boss/脉脉</div></div>
+    <div class="arch-node"><div class="lyr">数据层</div><div class="nm">人才库</div></div>
+    <div class="arch-node"><div class="lyr">数据层</div><div class="nm">反馈记录</div></div>
+  </div>
+</div>
+
+<!-- ====== 5. 分阶段技术路径 ====== -->
+<h2>5. 分阶段技术路径（MVP → 全量）</h2>
+
+<div class="phase-grid">
+
+<div class="phase">
+  <div class="num">Phase 1 · 1-2 个月</div>
+  <h4>职位监听 + 自动识别</h4>
+  <p>让系统"看得见"市场</p>
+  <ul>
+    <li>飞书 Bot 接入群聊，监听消息事件</li>
+    <li>LLM 做 NER + 信息抽取（公司/岗位/薪资/JD）</li>
+    <li>向量相似度 + 规则做职位去重</li>
+    <li>新职位 → 自动通知相关顾问</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="num">Phase 2 · 1-2 个月</div>
+  <h4>职位评分 + 初始仓位建议</h4>
+  <p>让系统"做判断"</p>
+  <ul>
+    <li>客户评分：历史反馈速度、面试率、Offer率</li>
+    <li>职位评分：JD完整度、薪资、市场供给、标准化程度</li>
+    <li>综合分 → 0-5 级仓位建议</li>
+    <li>判定是否进入闪电战模式</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="num">Phase 3 · 2-3 个月</div>
+  <h4>自动 Sourcing + 推荐列表</h4>
+  <p>让系统"动手找人"</p>
+  <ul>
+    <li>LLM 解析 JD → 结构化岗位画像</li>
+    <li>向量检索 + ES 标签过滤 → 搜候选人</li>
+    <li>多维匹配打分 + LLM 生成推荐理由</li>
+    <li>任务自动分派给 Sourcing 顾问</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="num">Phase 4 · 2-3 个月</div>
+  <h4>反馈追踪 + 动态仓位管理</h4>
+  <p>让系统"会调整"</p>
+  <ul>
+    <li>多渠道信号接入 → 统一反馈事件流</li>
+    <li>LLM 解析非结构化反馈（HR回复/顾问备注）</li>
+    <li>仓位状态机：自动加仓/减仓/止损</li>
+    <li>超时未反馈 → 自动提醒顾问</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <div class="num">Phase 5 · 持续迭代</div>
+  <h4>全流程自动化 + 学习复盘</h4>
+  <p>系统自主运转，持续进化</p>
+  <ul>
+    <li>Temporal/Airflow 编排全流程</li>
+    <li>定期策略复盘（命中率/策略有效性）</li>
+    <li>历史成交数据 fine-tune 匹配模型</li>
+    <li>A/B 测试仓位策略，选最优</li>
+    <li>规则库、标签体系持续更新</li>
+  </ul>
+</div>
+
+</div>
+
+<!-- ====== 6. 关键技术选型 ====== -->
+<h2>6. 关键技术选型</h2>
+
+<table>
+  <thead><tr><th>层次</th><th>推荐技术</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><strong>LLM</strong></td><td>GPT-4o / Claude / 国产大模型</td><td>JD解析、信息抽取、推荐理由、反馈理解</td></tr>
+    <tr><td><strong>向量数据库</strong></td><td>Milvus / Qdrant / Pinecone</td><td>候选人语义检索、职位去重</td></tr>
+    <tr><td><strong>搜索引擎</strong></td><td>Elasticsearch</td><td>硬条件过滤 + 标签检索</td></tr>
+    <tr><td><strong>消息队列</strong></td><td>Kafka / RabbitMQ</td><td>职位事件、反馈事件流</td></tr>
+    <tr><td><strong>工作流引擎</strong></td><td>Temporal / Airflow</td><td>多步骤流程编排</td></tr>
+    <tr><td><strong>数据库</strong></td><td>PostgreSQL + Redis</td><td>业务数据 + 缓存</td></tr>
+    <tr><td><strong>飞书集成</strong></td><td>Lark Open API</td><td>群消息监听、Bot任务通知、文档协作</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 7. 职位评分模型 ====== -->
+<h2>7. 职位评分模型</h2>
+
+<p>每个职位出现后，不立刻投入大量资源，先做快速评估。类似顾问花 5-10 分钟了解公司。</p>
+
+<h3>评分维度</h3>
+
+<table>
+  <thead><tr><th>维度</th><th>权重</th><th>关键指标</th></tr></thead>
+  <tbody>
+    <tr><td><strong>客户质量</strong></td><td>30%</td><td>历史反馈速度、面试率、Offer率、合作次数、是否愿意配合</td></tr>
+    <tr><td><strong>需求清晰度</strong></td><td>20%</td><td>JD完整度、薪资竞争力、年限/学历/技能要求是否合理、面试流程是否清楚</td></tr>
+    <tr><td><strong>人才供给</strong></td><td>25%</td><td>内部人才库匹配量、外部平台搜索难度、历史类似职位成功率</td></tr>
+    <tr><td><strong>成交可能性</strong></td><td>25%</td><td>公司吸引力、是否紧急招聘、是否有预算、是否有决策人参与</td></tr>
+  </tbody>
+</table>
+
+<h3>仓位映射</h3>
+
+<table>
+  <thead><tr><th>综合分</th><th>仓位等级</th><th>动作</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td>80+</td><td><span style="color:#00b894;font-weight:700">3-4 级</span></td><td>重点/重仓投入</td><td>多渠道搜索，多顾问协同</td></tr>
+    <tr><td>60-80</td><td><span style="color:#6c5ce7;font-weight:700">2 级</span></td><td>标准投入</td><td>推荐 3-5 人，进入闪电战</td></tr>
+    <tr><td>40-60</td><td><span style="color:#fdcb6e;font-weight:700">1 级</span></td><td>轻量试投</td><td>推荐 1-3 人，观察反馈</td></tr>
+    <tr><td>&lt;40</td><td><span style="color:#888;font-weight:700">0 级</span></td><td>观察，不主动投入</td><td>保留监控，等待信号变化</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 8. 仓位管理状态机 ====== -->
+<h2>8. 仓位管理状态机</h2>
+
+<div class="st-diagram">
+  <div class="st"><div class="lv">0 级</div><div class="dc">观察</div></div>
+  <div class="st-arr">→</div>
+  <div class="st"><div class="lv">1 级</div><div class="dc">试投</div></div>
+  <div class="st-arr">→</div>
+  <div class="st"><div class="lv">2 级</div><div class="dc">标准投入</div></div>
+  <div class="st-arr">→</div>
+  <div class="st"><div class="lv">3-4 级</div><div class="dc">重仓</div></div>
+</div>
+
+<h3>加仓条件</h3>
+<div class="card ok">
+  <ul>
+    <li>客户 24h 内反馈 | 候选人进入面试 | 面试反馈正向</li>
+    <li>客户明确催人 | 需求稳定 | 愿意快速推进</li>
+    <li>相似候选人命中率高 | 已出现 Offer 机会</li>
+  </ul>
+</div>
+
+<h3>减仓条件</h3>
+<div class="card warn">
+  <ul>
+    <li>客户长期不反馈 | 推荐多人均无面试 | 需求反复修改</li>
+    <li>候选人普遍不感兴趣 | 薪资竞争力不足 | 面试流程太慢</li>
+    <li>顾问反馈性价比低</li>
+  </ul>
+</div>
+
+<h3>止损条件</h3>
+<div class="card warn">
+  <ul>
+    <li>推荐超标后完全无反馈 | 客户超过设定期限不回复</li>
+    <li>职位关闭 | 需求长期模糊 | 投入产出比持续低于阈值</li>
+  </ul>
+</div>
+
+<p><strong>止损 ≠ 永久放弃</strong>，而是暂时退出，释放资源给更值得投入的职位。</p>
+
+<!-- ====== 9. 人机分工 ====== -->
+<h2>9. 人机分工模型</h2>
+
+<table>
+  <thead><tr><th>角色</th><th>职责</th><th>由谁承担</th></tr></thead>
+  <tbody>
+    <tr><td><strong>AI 系统</strong></td><td>监听职位、JD解析、打分、搜人、生成推荐列表、追踪反馈、仓位决策、提醒、数据沉淀、策略复盘</td><td>机器</td></tr>
+    <tr><td><strong>Sourcing 顾问</strong></td><td>补充职位上下文、判断AI结果可用性、打标、反馈原因、优化搜索策略、必要时做触达</td><td>人类</td></tr>
+    <tr><td><strong>电话/沟通顾问</strong></td><td>联系候选人、介绍职位、判断意愿、推进面试、候选人说服、跟进流程、促成 Offer</td><td>人类</td></tr>
+    <tr><td><strong>高阶非标顾问</strong></td><td>高阶岗位 Mapping、创始人/高管沟通、深度说服、Offer 谈判、非标需求拆解</td><td>人类</td></tr>
+    <tr><td><strong>策略型顾问</strong></td><td>分析职位投资价值、设计加仓减仓规则、复盘系统结果、优化 SOP、训练校准 AI</td><td>人类</td></tr>
+  </tbody>
+</table>
+
+<p>早期团队人数不多时，Sourcing 顾问和电话顾问可以是同一个人，但系统设计上必须区分这两个任务类型。</p>
+
+<!-- ====== 10. 闪电战打法 ====== -->
+<h2>10. 闪电战打法</h2>
+
+<div class="card idea">
+  <div class="lbl">闪电战核心策略</div>
+  <p>不是慢慢研究一个职位，而是 <strong>快速完成首轮覆盖</strong>。目标是让标准化职位在一轮闪电战后就进入"反馈等待"状态。</p>
+</div>
+
+<p>标准流程：</p>
+<ol>
+  <li>系统发现活跃职位</li>
+  <li>判断职位是否适合闪电战（标准化程度 + 库存充足）</li>
+  <li>自动解析 JD → 搜索人才库 + Boss/脉脉</li>
+  <li>按匹配度、可触达性、活跃度排序</li>
+  <li>生成第一批推荐列表 → 分发给顾问</li>
+  <li>顾问只需快速判断 + 联系</li>
+  <li>追踪客户反馈 → 反馈好自动追加 → 反馈差自动减仓</li>
+</ol>
+
+<p>理论上，只要数据源足够，系统可以对大量标准化职位进行地毯式推进，<strong>达到一天推荐大量候选人的效果</strong>。</p>
+
+<!-- ====== 11. 数据工程 ====== -->
+<h2>11. 数据是系统上限</h2>
+
+<div class="card info">
+  <div class="lbl">已有数据资产</div>
+  <ul>
+    <li>客户群里的职位信息</li>
+    <li>CRM / ATS 里的职位和候选人</li>
+    <li>公司内部人才库</li>
+    <li>历史推荐、面试、Offer 记录</li>
+    <li>顾问对候选人的评价</li>
+    <li>客户反馈速度与合作质量</li>
+  </ul>
+</div>
+
+<div class="card warn">
+  <div class="lbl">数据瓶颈</div>
+  <ul>
+    <li>很多职位信息未录入系统</li>
+    <li>客户真实需求只存在于聊天记录或顾问脑子里</li>
+    <li>冰山下的高价值候选人不在线上人才库</li>
+    <li>非标职位难以结构化表达</li>
+    <li>简历库质量、外部平台数据完整性</li>
+    <li>历史反馈未标准化沉淀</li>
+  </ul>
+</div>
+
+<p><strong>数据建设优先级：</strong> 从 Boss/脉脉获取更多简历 → 清洗完善人才库 → 标准化职位信息 → 标准化候选人标签 → 标准化客户反馈 → 把"口头信息"和"群聊信息"转为系统可用数据。</p>
+
+<!-- ====== 12. 关键指标 ====== -->
+<h2>12. 关键指标体系</h2>
+
+<h3>效率指标</h3>
+<table>
+  <thead><tr><th>指标</th><th>定义</th><th>目标方向</th></tr></thead>
+  <tbody>
+    <tr><td>新职位识别数量</td><td>每周系统自动识别的新职位数</td><td>↑</td></tr>
+    <tr><td>职位解析耗时</td><td>从发现职位到结构化输出</td><td>↓ 秒级</td></tr>
+    <tr><td>首批候选人产出耗时</td><td>从搜人到推荐列表生成</td><td>↓ 分钟级</td></tr>
+    <tr><td>每周自动处理职位数</td><td>系统主动推进的职位总量</td><td>↑</td></tr>
+    <tr><td>每周自动生成候选人数</td><td>系统产出候选人的总量</td><td>↑</td></tr>
+  </tbody>
+</table>
+
+<h3>质量指标</h3>
+<table>
+  <thead><tr><th>指标</th><th>定义</th><th>目标方向</th></tr></thead>
+  <tbody>
+    <tr><td>推荐到面试转化率</td><td>推荐人数 → 面试人数</td><td>↑</td></tr>
+    <tr><td>面试到 Offer 转化率</td><td>面试人数 → Offer 人数</td><td>↑</td></tr>
+    <tr><td>Offer 到入职转化率</td><td>Offer 人数 → 入职人数</td><td>↑</td></tr>
+    <tr><td>客户正反馈率</td><td>正向反馈 / 总反馈</td><td>↑</td></tr>
+    <tr><td>顾问采纳率</td><td>顾问确认推荐的比率</td><td>↑</td></tr>
+  </tbody>
+</table>
+
+<h3>投资回报指标</h3>
+<table>
+  <thead><tr><th>指标</th><th>定义</th><th>目标方向</th></tr></thead>
+  <tbody>
+    <tr><td>每小时推荐产出</td><td>推荐量 / 人力投入时间</td><td>↑</td></tr>
+    <tr><td>每小时面试产出</td><td>面试量 / 人力投入时间</td><td>↑</td></tr>
+    <tr><td>每小时 Offer 产出</td><td>Offer 量 / 人力投入时间</td><td>↑</td></tr>
+    <tr><td>单职位投入产出比</td><td>回款 / 投入时间成本</td><td>↑</td></tr>
+    <tr><td>自动化职位成交占比</td><td>系统主导成交 / 总成交</td><td>↑</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 13. 量化投资类比总结 ====== -->
+<h2>13. 量化投资类比总结</h2>
+
+<table>
+  <thead><tr><th>量化投资概念</th><th>招聘系统对应</th></tr></thead>
+  <tbody>
+    <tr><td>市场行情数据</td><td>职位群消息、驾驶舱、客户需求</td></tr>
+    <tr><td>标的选择</td><td>哪个职位值得做</td></tr>
+    <tr><td>建仓</td><td>初始投入 1-2 小时，推 3-5 人</td></tr>
+    <tr><td>仓位管理</td><td>加仓 / 减仓 / 止损</td></tr>
+    <tr><td>市场反馈（价格变动）</td><td>客户反馈速度、面试率、Offer 率</td></tr>
+    <tr><td>量化信号</td><td>客户历史响应时间、JD 完整度、人才供给量</td></tr>
+    <tr><td>回测</td><td>复盘历史策略有效性</td></tr>
+    <tr><td>对冲 / 分散</td><td>同时铺多个标准职位</td></tr>
+    <tr><td>散户 vs 机构</td><td>人肉顾问 vs AI 系统</td></tr>
+  </tbody>
+</table>
+
+<!-- ====== 14. 组织变化 ====== -->
+<h2>14. 组织形态变化</h2>
+
+<div class="card idea">
+  <div class="lbl">关键转变</div>
+  <p>顾问从"完整流程执行者"分化为系统服务者、校准者、高价值环节执行者。公司能力从"人驱动"变成"系统驱动"。</p>
+</div>
+
+<p><strong>系统最终价值：</strong> 大幅提高标准职位覆盖效率 → 减少低价值重复劳动 → 提高资源配置效率 → 形成规模优势 → 沉淀组织能力（标签、规则、策略、数据、模型、流程）。</p>
+
+</div>
+</body>
+</html>

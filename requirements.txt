@@ -1,0 +1,10 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+openai>=1.0.0
+playwright>=1.42.0
+markitdown>=1.0.0a1
+python-multipart>=0.0.9
+jinja2>=3.1.0
