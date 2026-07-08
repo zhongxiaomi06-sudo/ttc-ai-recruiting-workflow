@@ -1,6 +1,15 @@
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+    load_dotenv()
+except Exception:
+    pass
+
 DAEMON_HOST = os.getenv("TTC_DAEMON_HOST", "127.0.0.1")
 DAEMON_PORT = int(os.getenv("TTC_DAEMON_PORT", "8766"))
 DATA_DIR = Path(os.getenv("TTC_DATA_DIR", str(Path(__file__).parent / "data")))
@@ -46,6 +55,8 @@ FILE_READER_CONFIG = {
 # 飞书 Bot 通知配置
 FEISHU_BOT_CONFIG = {
     "webhook_url": os.getenv("TTC_FEISHU_BOT_WEBHOOK", ""),
+    "chat_id": os.getenv("TTC_FEISHU_CHAT_ID", ""),
+    "enabled": os.getenv("TTC_FEISHU_NOTIFY_ENABLED", "false").lower() == "true",
     "dashboard_url": os.getenv("TTC_DASHBOARD_URL", "http://127.0.0.1:8766"),
 }
 

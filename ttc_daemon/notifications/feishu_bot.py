@@ -1,6 +1,12 @@
-"""Feishu Bot 通知：新的人类任务生成时推送给猎头/顾问。"""
+"""Feishu Bot 通知：新的人类任务生成时推送给猎头/顾问。
+
+优先使用 webhook（配置 TTC_FEISHU_BOT_WEBHOOK）。
+未配置 webhook 但配置了 TTC_FEISHU_CHAT_ID 时，使用本地 lark-cli 发送群消息。
+"""
 import json
 import logging
+import os
+import subprocess
 from typing import Any, Dict, Optional
 
 import requests
@@ -14,10 +20,72 @@ def _webhook_url() -> Optional[str]:
     return FEISHU_BOT_CONFIG.get("webhook_url", "") or None
 
 
-def notify_new_task(task: Dict[str, Any], dashboard_url: str = "") -> bool:
-    """发送新任务通知到飞书群机器人。"""
+def _chat_id() -> Optional[str]:
+    return FEISHU_BOT_CONFIG.get("chat_id", "") or None
+
+
+def _enabled() -> bool:
+    return bool(_webhook_url() or _chat_id()) and FEISHU_BOT_CONFIG.get("enabled", False)
+
+
+def _dashboard_url() -> str:
+    return FEISHU_BOT_CONFIG.get("dashboard_url", "http://127.0.0.1:8766")
+
+
+def _task_url(task: Dict[str, Any]) -> str:
+    return _dashboard_url().rstrip("/") + task.get("html_url", f"/human/task/{task['id']}")
+
+
+def _send_via_cli(text: str) -> bool:
+    chat_id = _chat_id()
+    if not chat_id:
+        return False
+    cmd = [
+        "lark-cli",
+        "im", "+messages-send",
+        "--as", "bot",
+        "--chat-id", chat_id,
+        "--msg-type", "text",
+        "--text", text,
+    ]
+    try:
+        env = os.environ.copy()
+        env["LARKSUITE_CLI_NO_UPDATE_NOTIFIER"] = "1"
+        env["LARKSUITE_CLI_NO_SKILLS_NOTIFIER"] = "1"
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+        if result.returncode != 0:
+            logger.warning("lark-cli send failed: %s", result.stderr or result.stdout)
+            return False
+        logger.info("Feishu CLI message sent to %s", chat_id)
+        return True
+    except Exception as e:
+        logger.warning("Feishu CLI send error: %s", e)
+        return False
+
+
+def _send_card(card: Dict[str, Any]) -> bool:
     url = _webhook_url()
-    if not url:
+    if url:
+        try:
+            resp = requests.post(url, json=card, timeout=15)
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            logger.warning("Feishu webhook failed: %s", e)
+            return False
+
+    # Fallback to lark-cli with simple text if chat_id is configured
+    text = card.get("card", {}).get("header", {}).get("title", {}).get("content", "TTC 通知")
+    elements = card.get("card", {}).get("elements", [])
+    for el in elements:
+        if el.get("tag") == "div" and "text" in el:
+            text += "\n" + el["text"].get("content", "")
+    return _send_via_cli(text)
+
+
+def notify_new_task(task: Dict[str, Any]) -> bool:
+    """发送新任务通知到飞书。"""
+    if not _enabled():
         return False
 
     payload = task.get("payload", "{}")
@@ -38,8 +106,9 @@ def notify_new_task(task: Dict[str, Any], dashboard_url: str = "") -> bool:
         "classify_uncertain": "📂 分类不确定",
     }
     label = task_type_labels.get(task.get("task_type"), "📝 新任务")
-    task_url = dashboard_url.rstrip("/") + task.get("html_url", f"/human/task/{task['id']}")
+    task_url = _task_url(task)
 
+    # Try webhook card first
     card = {
         "msg_type": "interactive",
         "card": {
@@ -71,24 +140,26 @@ def notify_new_task(task: Dict[str, Any], dashboard_url: str = "") -> bool:
             ],
         },
     }
+    if _webhook_url():
+        return _send_card(card)
 
-    try:
-        resp = requests.post(url, json=card, timeout=15)
-        resp.raise_for_status()
-        logger.info("Feishu bot notified for task %s", task["id"])
-        return True
-    except Exception as e:
-        logger.warning("Feishu bot notify failed: %s", e)
-        return False
+    # Fallback to CLI text
+    text = (
+        f"{label}\n"
+        f"任务 ID：{task['id']}\n"
+        f"类型：{task.get('task_type', '')}\n"
+        f"状态：{task.get('status', '')}\n"
+        f"打开：{task_url}"
+    )
+    return _send_via_cli(text)
 
 
-def notify_problem(task: Dict[str, Any], problem: str, dashboard_url: str = "") -> bool:
+def notify_problem(task: Dict[str, Any], problem: str) -> bool:
     """发送异常任务通知。"""
-    url = _webhook_url()
-    if not url:
+    if not _enabled():
         return False
 
-    task_url = dashboard_url.rstrip("/") + task.get("html_url", f"/human/task/{task['id']}")
+    task_url = _task_url(task)
     card = {
         "msg_type": "interactive",
         "card": {
@@ -120,12 +191,8 @@ def notify_problem(task: Dict[str, Any], problem: str, dashboard_url: str = "") 
             ],
         },
     }
+    if _webhook_url():
+        return _send_card(card)
 
-    try:
-        resp = requests.post(url, json=card, timeout=15)
-        resp.raise_for_status()
-        logger.info("Feishu problem notified for task %s", task["id"])
-        return True
-    except Exception as e:
-        logger.warning("Feishu problem notify failed: %s", e)
-        return False
+    text = f"⚠️ AI 遇到异常\n问题：{problem[:200]}\n任务 ID：{task['id']}\n打开：{task_url}"
+    return _send_via_cli(text)

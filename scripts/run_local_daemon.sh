@@ -6,6 +6,13 @@ PORT="${TTC_DAEMON_PORT:-8766}"
 
 cd "$APP_DIR"
 
+# Source local .env first; allow overriding via exported env vars.
+if [[ -f "$APP_DIR/.env" ]]; then
+  set -a
+  source "$APP_DIR/.env"
+  set +a
+fi
+
 if [[ -f "$APP_DIR/venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
   source "$APP_DIR/venv/bin/activate"
@@ -18,6 +25,7 @@ fi
 
 export TTC_SOURCE_TALENT_ENABLED="${TTC_SOURCE_TALENT_ENABLED:-true}"
 export TTC_API_TOKEN="${TTC_API_TOKEN:-localtest}"
+export TTC_FEISHU_NOTIFY_ENABLED="${TTC_FEISHU_NOTIFY_ENABLED:-true}"
 
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/tmp/ttc_port_check.$$ 2>/dev/null; then
   echo "Port $PORT is already in use:" >&2

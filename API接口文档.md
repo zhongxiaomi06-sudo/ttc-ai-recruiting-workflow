@@ -282,7 +282,44 @@ curl --noproxy "*" -X POST "$TTC_URL/admin/read-job/rjob_xxx/retry" \
 
 ---
 
-## 6. 健康检查
+## 6. TalentMatch / GoldScoreEngine 接入方向
+
+当前系统已经把评分集中在 `ttc_daemon/core/scoring.py`，可以把它升级成可替换 provider，而不改 Mission 主状态机。
+
+推荐三种接法：
+
+1. **内置 LLM 评分**  
+   配置 `TTC_LLM_API_KEY`、`TTC_LLM_BASE_URL`、`TTC_LLM_MODEL` 后，由评分层把 `jd_fields + candidate profile + evidence` 发给 LLM，返回 `overall_score`、`match_reasons`、`risk_flags`、`verification_questions`。
+
+2. **外部 TalentMatch/GoldScoreEngine 服务**  
+   把本系统作为编排子系统，评分时调用外部 HTTP 服务，例如：
+
+   ```text
+   POST /match/score
+   {
+     "mission_id": "miss_xxx",
+     "jd": {...},
+     "candidates": [...]
+   }
+   ```
+
+   服务返回候选人分数后，Daemon 继续生成电话任务，不需要外部服务理解 read_job、problem_task 或人工恢复逻辑。
+
+3. **本系统作为被调用子系统**  
+   上层系统只需要调用：
+
+   - `/ingest/feishu` 或 `/ingest/read-link`：提交 JD
+   - `/mission/{mission_id}`：查询状态
+   - `/api/call-list`：拿电话清单
+   - `/human/task/{task_id}/complete`：回写电话结果
+
+   这样 TTC Daemon 负责读入、归一化、异常任务、Mission 编排和电话任务生成；上层系统负责账号、权限、CRM、BI 或业务看板。
+
+接入原则：**不要绕过 `mission_router` 和 `problem_task`**。真实评分引擎只替换 `scoring_agent` / `score_candidate`，不要替换读取、分类、归一化和人机恢复闭环。
+
+---
+
+## 7. 健康检查
 
 ```bash
 curl --noproxy "*" "$TTC_URL/health"
@@ -290,7 +327,7 @@ curl --noproxy "*" "$TTC_URL/health"
 
 ---
 
-## 7. 推荐测试流程
+## 8. 推荐测试流程
 
 1. 启动服务：`scripts/run_local_daemon.sh` 或 `docker compose up -d --build`
 2. 访问 `http://127.0.0.1:8766/admin/source-talent`，确认 `mysql_enabled=true` 或 JSON 文件数量正常。

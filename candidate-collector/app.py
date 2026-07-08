@@ -365,7 +365,10 @@ def parse_candidate(payload: CapturePayload) -> dict[str, Any]:
         text = clean_text("\n".join(f"{s.get('heading', '')}\n{s.get('text', '')}" for s in sections))
     else:
         text = clean_text(payload.text)
-    explicit_age = first_match([r"(?:年龄[\s：:]*|\b)([2-5]\d)岁"], text)
+    explicit_age = first_match([
+        r"(?:年龄[\s：:]*)([2-5]\d)(?:岁)?",
+        r"(?:\b|[｜|,，;；\s])([2-5]\d)岁",
+    ], text)
     years = first_match([
         r"(\d+(?:\.\d+)?)年(?:工作|经验)",
         r"工作(?:年限|经验)[\s：:]*(\d+(?:\.\d+)?)年",
