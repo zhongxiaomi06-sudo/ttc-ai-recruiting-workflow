@@ -11,27 +11,63 @@ AI-led recruiting workflow for JD ingestion, artifact classification, candidate 
 - `ttc-feishu-bridge.user.js`, `ttc-chatgpt-reader.user.js`: browser userscripts.
 - Architecture and deployment documentation in Markdown/HTML files.
 
-## Local Run
+## Current Shared Entry
+
+The currently deployed project is served from the TalentMatch server:
+
+- TalentMatch frontend: `https://yorkteam.cn`
+- TTC workflow backend prefix: `https://yorkteam.cn/api/ttc`
+- TTC workflow dashboard: `https://yorkteam.cn/api/ttc/dashboard`
+- Health check: `https://yorkteam.cn/api/ttc/health`
+
+On the server the TTC daemon runs behind nginx as a systemd service:
+
+```bash
+systemctl status ttc-daemon
+systemctl restart ttc-daemon
+journalctl -u ttc-daemon -f
+```
+
+The service working directory is `/opt/ttc-automation`, and the production
+environment file is `/opt/ttc-automation/.env.server`.
+
+## Local Development Run
+
+Use this only for local debugging. The shared project should be accessed through
+the TalentMatch server above.
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Optional: only needed when using automatic browser/page reading.
 python3 -m playwright install chromium
+
+cp .env.example .env
 scripts/run_local_daemon.sh
 ```
 
-Open:
+Open the local daemon directly:
 
 ```text
 http://127.0.0.1:8766/dashboard
 ```
 
-`scripts/run_local_daemon.sh` will automatically load `.env` if present.
+If port `8766` is already in use, stop the old local process first:
+
+```bash
+lsof -nP -iTCP:8766 -sTCP:LISTEN
+kill <PID>
+```
+
+`scripts/run_local_daemon.sh` automatically loads `.env` and `~/.ttc/mysql.env`
+when they exist. For local write APIs it defaults `TTC_API_TOKEN` to
+`localtest`; production uses the token from `.env.server`.
 
 ## Environment Configuration
 
-Copy `.env.example` to `.env` and fill in real values:
+For local development, copy `.env.example` to `.env` and fill in real values:
 
 ```bash
 cp .env.example .env
@@ -45,6 +81,19 @@ Key variables:
 - `TTC_LLM_*`: optional LLM provider for JD parsing/classification
 
 `.env` is gitignored. Do not commit it.
+
+For the TalentMatch server, use `.env.server.example` as the template:
+
+```bash
+cd /opt/ttc-automation
+cp .env.server.example .env.server
+vim .env.server
+deploy/server_bootstrap.sh
+```
+
+The nginx config should include the TTC location block from
+`deploy/nginx-talentmatch-ttc.conf`, which proxies `/api/ttc/*` to
+`127.0.0.1:8766`.
 
 ## Source Talent MySQL
 
