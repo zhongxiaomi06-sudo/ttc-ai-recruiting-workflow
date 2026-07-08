@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}客户简报 · {{ payload.jd_fields.position | default('岗位') if payload.jd_fields else '岗位' }}{% endblock %}
+{% block content %}
+<div class="card green">
+  <span class="tag">客户简报</span>
+  <span class="tag">Mission：{{ task.mission_id }}</span>
+  <h2 style="margin-top:12px;">
+    {% if payload.jd_fields %}
+    {{ payload.jd_fields.company | default('客户') }} — {{ payload.jd_fields.position | default('岗位') }}
+    {% else %}
+    客户简报
+    {% endif %}
+  </h2>
+  {% if payload.jd_fields %}
+  <p class="muted">
+    {% if payload.jd_fields.location %}📍 {{ payload.jd_fields.location }} &nbsp;{% endif %}
+    {% if payload.jd_fields.salary %}💰 {{ payload.jd_fields.salary }} &nbsp;{% endif %}
+    {% if payload.jd_fields.experience_years %}📅 {{ payload.jd_fields.experience_years }}{% endif %}
+  </p>
+  {% endif %}
+  <p class="muted">生成时间：{{ payload.generated_at | default('') }}</p>
+</div>
+
+{% if payload.jd_fields %}
+<div class="card">
+  <h3>岗位概要</h3>
+  {% if payload.jd_fields.skills %}
+  <div class="section">
+    <div class="section-title">核心技能要求</div>
+    <div>
+      {% for skill in payload.jd_fields.skills %}
+      <span class="tag">{{ skill }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% if payload.jd_fields.responsibilities %}
+  <div class="section">
+    <div class="section-title">职责描述</div>
+    <p>{{ payload.jd_fields.responsibilities }}</p>
+  </div>
+  {% endif %}
+  {% if payload.jd_fields.requirements %}
+  <div class="section">
+    <div class="section-title">任职要求</div>
+    <p>{{ payload.jd_fields.requirements }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if payload.top_candidates %}
+<div class="card">
+  <h3>Top {{ payload.top_candidates | length }} 候选人对比</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>候选人</th>
+        <th>综合评分</th>
+        <th>评级</th>
+        <th>技术深度</th>
+        <th>项目所有权</th>
+        <th>复杂度</th>
+        <th>风险信号</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in payload.top_candidates %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ c.name | default('未知') }}</strong></td>
+        <td><span class="score">{{ c.overall_score | default('?') }}</span></td>
+        <td>{{ c.level | default('?') }}</td>
+        <td>
+          {% set td = c.dimension_scores.get('tech_depth', {}) if c.dimension_scores is mapping else {} %}
+          {{ td.get('score', '?') if td is mapping else '?' }}
+        </td>
+        <td>
+          {% set po = c.dimension_scores.get('project_ownership', {}) if c.dimension_scores is mapping else {} %}
+          {{ po.get('score', '?') if po is mapping else '?' }}
+        </td>
+        <td>
+          {% set cx = c.dimension_scores.get('complexity', {}) if c.dimension_scores is mapping else {} %}
+          {{ cx.get('score', '?') if cx is mapping else '?' }}
+        </td>
+        <td>
+          {% if c.risk_flags %}
+          {% for rf in c.risk_flags[:2] %}
+          <span class="tag" style="font-size:.7em;{% if rf is mapping and rf.severity == 'red' %}color:var(--red);border-color:var(--red);{% endif %}">
+            {{ rf.flag if rf is mapping else rf }}
+          </span>
+          {% endfor %}
+          {% if c.risk_flags | length > 2 %}
+          <span class="muted">+{{ c.risk_flags | length - 2 }}</span>
+          {% endif %}
+          {% else %}
+          <span class="muted">无</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if payload.scoring_summary %}
+<div class="card">
+  <h3>候选人池统计</h3>
+  <div style="display:flex;gap:18px;flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <div class="score">{{ payload.scoring_summary.total | default(0) }}</div>
+      <div class="muted">总候选人</div>
+    </div>
+    {% if payload.scoring_summary.level_distribution %}
+    {% for level, count in payload.scoring_summary.level_distribution.items() %}
+    <div style="text-align:center;">
+      <div style="font-size:1.2em;color:var(--accent2);font-weight:700;">{{ count }}</div>
+      <div class="muted">{{ level }}</div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if payload.recommendation %}
+<div class="card green">
+  <h3>推荐策略</h3>
+  <p>{{ payload.recommendation }}</p>
+</div>
+{% endif %}
+
+{% if payload.next_steps %}
+<div class="card blue">
+  <h3>下一步建议</h3>
+  <ol>
+    {% for step in payload.next_steps %}
+    <li>{{ step }}</li>
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+
+<div class="card yellow">
+  <h3>反馈</h3>
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <div class="radio-group">
+      <label><input type="radio" name="outcome" value="approved" required> 确认发送给客户</label>
+      <label><input type="radio" name="outcome" value="need_revision"> 需要修改</label>
+    </div>
+
+    <label for="notes">修改意见</label>
+    <textarea id="notes" name="notes" placeholder="如需修改，请说明需要调整的内容"></textarea>
+
+    <button type="submit" class="btn">提交</button>
+  </form>
+</div>
+{% endblock %}

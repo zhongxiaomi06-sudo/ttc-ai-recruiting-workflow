@@ -2,28 +2,104 @@
 {% block title %}审核任务 · {{ task.task_type }}{% endblock %}
 {% block content %}
 <div class="card blue">
-  <span class="tag">任务类型：{% if task.task_type == 'review' %}顾问审核{% else %}合规仲裁{% endif %}</span>
+  <span class="tag">任务类型：顾问审核</span>
   <span class="tag">任务 ID：{{ task.id }}</span>
   <h2 style="margin-top:12px;">{{ payload.title | default('需要您的人工判断') }}</h2>
   <p class="muted">Mission：{{ task.mission_id }}</p>
+  {% if payload.jd_fields %}
+  <p class="muted" style="margin-top:8px;">
+    岗位：{{ payload.jd_fields.company | default('?') }} — {{ payload.jd_fields.position | default('?') }}
+    {% if payload.jd_fields.location %} · {{ payload.jd_fields.location }}{% endif %}
+  </p>
+  {% endif %}
 </div>
 
+{% if payload.review_candidates %}
 <div class="card">
-  <h3>待审核内容</h3>
-  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;">{{ payload.content | default('') }}</pre>
+  <h3>待审核候选人列表</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>候选人</th>
+        <th>评分</th>
+        <th>评级</th>
+        <th>置信度</th>
+        <th>风险信号</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rc in payload.review_candidates %}
+      <tr>
+        <td><strong>{{ rc.name | default('未知') }}</strong></td>
+        <td><span class="score" style="font-size:1.1em;">{{ rc.overall_score | default('?') }}</span></td>
+        <td>{{ rc.level | default('?') }}</td>
+        <td>
+          {% if rc.confidence == 'high' %}
+          <span style="color:var(--green)">高</span>
+          {% elif rc.confidence == 'low' %}
+          <span style="color:var(--red)">低</span>
+          {% else %}
+          <span style="color:var(--yellow)">中</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if rc.risk_flags %}
+          {% for rf in rc.risk_flags %}
+          <span class="tag" style="font-size:.7em;{% if rf is mapping and rf.severity == 'red' %}color:var(--red);border-color:var(--red);{% endif %}">
+            {{ rf.flag if rf is mapping else rf }}
+          </span>
+          {% endfor %}
+          {% else %}
+          <span class="muted">无</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
+{% endif %}
+
+{% if payload.content %}
+<div class="card">
+  <h3>详细内容</h3>
+  <pre style="background:#0d0d14;padding:14px;border-radius:6px;white-space:pre-wrap;font-size:.9em;">{{ payload.content }}</pre>
+</div>
+{% endif %}
+
+{% if payload.candidate %}
+<div class="card">
+  <h3>候选人画像</h3>
+  {% if payload.candidate.verification_questions %}
+  <div class="section">
+    <div class="section-title">AI 建议追问</div>
+    <ul>
+      {% for q in payload.candidate.verification_questions[:5] %}
+      <li>{{ q }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if payload.candidate.company_analysis %}
+  <div class="section">
+    <div class="section-title">公司含金量分析</div>
+    <p class="muted">{{ payload.candidate.company_analysis }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card yellow">
   <h3>决策</h3>
   <form method="post" action="/human/task/{{ task.id }}/complete">
     <div class="radio-group">
-      <label><input type="radio" name="outcome" value="approved" required> 通过</label>
-      <label><input type="radio" name="outcome" value="rejected"> 驳回</label>
-      <label><input type="radio" name="outcome" value="need_more_info"> 需要补充信息</label>
+      <label><input type="radio" name="outcome" value="approved" required> ✅ 通过（候选人进入电话清单）</label>
+      <label><input type="radio" name="outcome" value="rejected"> ❌ 驳回（排除候选人）</label>
+      <label><input type="radio" name="outcome" value="need_more_info"> 📋 需要补充信息</label>
     </div>
 
-    <label for="notes">意见</label>
-    <textarea id="notes" name="notes" placeholder="写下您的判断理由或补充要求"></textarea>
+    <label for="notes">审核意见</label>
+    <textarea id="notes" name="notes" placeholder="写下您的判断理由，例如：哪些候选人需要排除，哪些风险可以接受"></textarea>
 
     <button type="submit" class="btn">提交决策</button>
   </form>

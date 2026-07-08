@@ -2,7 +2,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -27,6 +27,9 @@ def _load_json(value: Any, default: Any = None) -> Any:
         return json.loads(value)
     except Exception:
         return default
+
+
+# ── 创建任务 ────────────────────────────────────────────────────────────────
 
 
 def create_call_tasks(mission: Dict[str, Any], call_items: List[Dict[str, Any]]) -> List[str]:
@@ -58,7 +61,7 @@ def create_call_tasks(mission: Dict[str, Any], call_items: List[Dict[str, Any]])
 def create_problem_task(
     mission_id: Optional[str], role: str, task_type: str, payload: Dict[str, Any]
 ) -> str:
-    """创建一个“AI 遇到问题时需要人解决”的任务。"""
+    """创建一个"AI 遇到问题时需要人解决"的任务。"""
     tid = db.insert_human_task(mission_id, role, task_type, payload)
     logger.info(
         "Created problem task %s (type=%s, role=%s, mission=%s)",
@@ -70,26 +73,16 @@ def create_problem_task(
     return tid
 
 
+# ── 渲染 ────────────────────────────────────────────────────────────────────
+
+
 def get_task_html(tid: str) -> str:
     task = db.get_human_task(tid)
     if not task:
         return _jinja_env.get_template("404.html").render(message="任务不存在")
 
     payload = _load_json(task.get("payload"), {})
-    template_name = {
-        "call": "call_task.html",
-        "review": "review_task.html",
-        "compliance": "compliance_task.html",
-        "jd_clarify": "problem_task.html",
-        "source_help": "problem_task.html",
-        "scoring_conflict": "problem_task.html",
-        "outreach_problem": "problem_task.html",
-        "runtime_error": "problem_task.html",
-        "empty_content": "problem_task.html",
-        "login_required": "problem_task.html",
-        "read_failed": "problem_task.html",
-        "classify_uncertain": "problem_task.html",
-    }.get(task["task_type"], "generic_task.html")
+    template_name = _template_for_task(task, payload)
 
     # 补充候选人和 JD 信息用于渲染
     candidate_id = payload.get("candidate_id")
@@ -101,6 +94,9 @@ def get_task_html(tid: str) -> str:
             cand["raw_profile"] = _load_json(cand.get("raw_profile"), {})
             cand["enriched_profile"] = _load_json(cand.get("enriched_profile"), {})
             cand["risk_flags"] = _load_json(cand.get("risk_flags"), [])
+            cand["dimension_scores"] = _load_json(cand.get("dimension_scores"), {})
+            cand["evidence_binding"] = _load_json(cand.get("evidence_binding"), [])
+            cand["verification_questions"] = _load_json(cand.get("verification_questions"), [])
             payload["candidate"] = cand
 
     jd_record_id = payload.get("jd_record_id") or payload.get("jd_record", {}).get("id")
@@ -108,16 +104,61 @@ def get_task_html(tid: str) -> str:
         row = db.get_conn().execute("SELECT * FROM ingest_records WHERE id = ?", (jd_record_id,)).fetchone()
         payload["jd_record"] = dict(row) if row else payload.get("jd_record", {})
 
+    # 补充 JD fields
+    if task.get("mission_id"):
+        mission = db.get_mission(task["mission_id"])
+        if mission:
+            payload["jd_fields"] = _load_json(mission.get("jd_fields"), {})
+
     db.update_human_task_status(tid, "opened")
     return _jinja_env.get_template(template_name).render(task=task, payload=payload)
 
 
+def _template_for_task(task: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    """根据任务类型选择模板。"""
+    task_type = task.get("task_type", "")
+
+    template_map = {
+        "call": "call_task.html",
+        "review": "review_task.html",
+        "compliance": "compliance_task.html",
+        "client_brief": "client_brief.html",
+        "jd_clarify": "problem_task.html",
+        "source_help": "problem_task.html",
+        "scoring_conflict": "problem_task.html",
+        "outreach_problem": "problem_task.html",
+        "runtime_error": "problem_task.html",
+        "empty_content": "problem_task.html",
+        "login_required": "problem_task.html",
+        "read_failed": "problem_task.html",
+        "classify_uncertain": "problem_task.html",
+    }
+    return template_map.get(task_type, "generic_task.html")
+
+
 def render_dashboard(missions: List[Dict[str, Any]], pending_tasks: List[Dict[str, Any]]) -> str:
     """渲染 Mission 仪表盘。"""
+    from collections import Counter
+
     for m in missions:
         m["candidate_count"] = len(_load_json(m.get("candidate_ids"), []))
         m["call_task_count"] = len(_load_json(m.get("call_list_ids"), []))
-    return _jinja_env.get_template("dashboard.html").render(missions=missions, pending_tasks=pending_tasks)
+        m.setdefault("allocation_state", "DISCOVERED")
+        m.setdefault("priority_score", 0.0)
+
+    # 仓位分布摘要
+    allocation_summary = dict(
+        Counter(m.get("allocation_state", "DISCOVERED") for m in missions)
+    )
+
+    return _jinja_env.get_template("dashboard.html").render(
+        missions=missions,
+        pending_tasks=pending_tasks,
+        allocation_summary=allocation_summary,
+    )
+
+
+# ── 完成任务 ────────────────────────────────────────────────────────────────
 
 
 def complete_task(tid: str, result: Dict[str, Any]) -> None:
@@ -129,41 +170,78 @@ def complete_task(tid: str, result: Dict[str, Any]) -> None:
     db.complete_human_task(tid, result)
 
     payload = _load_json(task.get("payload"), {})
-    call_list_id = payload.get("call_list_id")
-    if call_list_id and result.get("outcome"):
-        # 同步 call_list 状态
-        with db.get_conn() as conn:
-            conn.execute(
-                "UPDATE call_list SET status = ? WHERE id = ?",
-                (result["outcome"], call_list_id),
-            )
-        # 同步 feedback
-        candidate_id = payload.get("candidate_id")
-        if candidate_id:
-            db.insert_feedback(
-                {
-                    "candidate_id": candidate_id,
-                    "call_list_id": call_list_id,
-                    "outcome": result.get("outcome", ""),
-                    "notes": result.get("notes", ""),
-                }
-            )
 
-    if task["task_type"] != "call":
+    if task["task_type"] == "call":
+        _complete_call_task(task, payload, result)
+    elif task["task_type"] in ("review", "compliance"):
+        _complete_review_or_compliance_task(task, payload, result)
+    else:
         _complete_problem_task(task, payload, result)
-    elif task.get("mission_id"):
+
+    # 检查是否需要 resume mission
+    if task.get("mission_id"):
         _resume_mission_if_tasks_done(task["mission_id"])
 
     logger.info("Human task %s completed with outcome %s", tid, result.get("outcome"))
 
 
-def _complete_problem_task(task: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]) -> None:
+def _complete_call_task(task: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """完成打电话任务：同步 call_list 状态和 feedback 记录。"""
+    call_list_id = payload.get("call_list_id")
+    if call_list_id and result.get("outcome"):
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE call_list SET status = ? WHERE id = ?",
+                (result["outcome"], call_list_id),
+            )
+    candidate_id = payload.get("candidate_id")
+    if candidate_id:
+        db.insert_feedback({
+            "candidate_id": candidate_id,
+            "call_list_id": call_list_id or "",
+            "outcome": result.get("outcome", ""),
+            "notes": result.get("notes", ""),
+        })
+
+
+def _complete_review_or_compliance_task(
+    task: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """完成审核/合规任务。
+
+    审核结果：
+    - approved：审核通过，待 resume_mission 推进 Mission
+    - rejected：驳回，关闭 Mission
+    - need_more_info：需要补充信息，转为 problem_pending
+    """
+    outcome = result.get("outcome", "")
     mission_id = task.get("mission_id")
+
+    if outcome == "rejected" and mission_id:
+        db.update_mission_state(
+            mission_id, "closed",
+            {"outcome": f"{task['task_type']}_rejected", "closed_at": db.now_iso()},
+        )
+        logger.info("Mission %s closed: %s rejected", mission_id, task["task_type"])
+    elif outcome == "need_more_info" and mission_id:
+        db.update_mission_state(
+            mission_id, "problem_pending",
+            {"resume_state": payload.get("resume_state", "calling")},
+        )
+        logger.info("Mission %s → problem_pending: need more info from review", mission_id)
+    # "approved" 不做额外操作，由 _resume_mission_if_tasks_done 推进
+
+
+def _complete_problem_task(
+    task: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """完成异常处理任务。"""
+    mission_id = task.get("mission_id")
+
     if result.get("outcome") == "cannot_resolve":
         if mission_id:
             db.update_mission_state(
-                mission_id,
-                "closed",
+                mission_id, "closed",
                 {"outcome": "human_cannot_resolve", "closed_at": db.now_iso()},
             )
         return
@@ -172,6 +250,7 @@ def _complete_problem_task(task: Dict[str, Any], payload: Dict[str, Any], result
         return
 
     resume_action = payload.get("resume_action") or task.get("task_type")
+
     if resume_action in {"retry_read", "provide_access"}:
         _resume_read_job(payload, result, retry=True)
     elif resume_action == "re_capture":
@@ -258,6 +337,13 @@ def _resume_jd_clarify(mission_id: Optional[str], payload: Dict[str, Any], resul
 
 
 def _resume_mission_if_tasks_done(mission_id: str) -> None:
+    """当所有 human_tasks 完成时，推进 Mission 到 resume_state。
+
+    优先级：
+    1. 先检查是否有 active 的审核/合规任务（需要先完成）
+    2. 检查所有任务是否全部完成
+    3. 如果全部完成，resume 到对应状态
+    """
     mission = db.get_mission(mission_id)
     if not mission:
         return
@@ -265,8 +351,36 @@ def _resume_mission_if_tasks_done(mission_id: str) -> None:
     active = [t for t in tasks if t["status"] in {"pending", "notified", "opened"}]
     if active:
         return
+
+    # 所有任务完成，确定 resume 目标
+    current_state = mission.get("state", "")
+
+    if current_state == "human_review":
+        # 审核完成 → 检查是否有被驳回的
+        review_tasks = [t for t in tasks if t.get("task_type") == "review"]
+        any_rejected = any(
+            _load_json(t.get("result"), {}).get("outcome") == "rejected"
+            for t in review_tasks
+        )
+        if any_rejected:
+            # 已在 _complete_review_or_compliance_task 中关闭
+            return
+        # 审核通过 → calling
+        db.update_mission_state(mission_id, "calling", {"resume_state": None})
+        return
+
+    if current_state == "problem_pending":
+        # 问题解决 → 回到 resume_state
+        resume_state = mission.get("resume_state") or "created"
+        db.update_mission_state(mission_id, resume_state, {"resume_state": None})
+        return
+
+    # 默认：human_pending → feedback
     resume_state = mission.get("resume_state") or "feedback"
     db.update_mission_state(mission_id, resume_state, {"resume_state": None})
+
+
+# ── 辅助函数 ────────────────────────────────────────────────────────────────
 
 
 def _split_field(value: Any) -> List[str]:

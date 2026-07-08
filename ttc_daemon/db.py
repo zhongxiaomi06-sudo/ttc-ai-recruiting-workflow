@@ -174,6 +174,17 @@ def init_db():
         _ensure_column(conn, "read_jobs", "error_reason", "TEXT")
         _ensure_column(conn, "normalized_artifacts", "reason", "TEXT")
         _ensure_column(conn, "call_list", "mission_id", "TEXT")
+        _ensure_column(conn, "missions", "allocation_state", "TEXT DEFAULT 'DISCOVERED'")
+        _ensure_column(conn, "missions", "priority_score", "REAL DEFAULT 0.0")
+        _ensure_column(conn, "candidates", "dimension_scores", "TEXT")
+        _ensure_column(conn, "candidates", "evidence_binding", "TEXT")
+        _ensure_column(conn, "candidates", "verification_questions", "TEXT")
+        _ensure_column(conn, "candidates", "level", "TEXT")
+        _ensure_column(conn, "candidates", "confidence", "TEXT")
+        _ensure_column(conn, "candidates", "company_analysis", "TEXT")
+        _ensure_column(conn, "candidates", "needs_human_review", "INTEGER DEFAULT 0")
+        _ensure_column(conn, "candidates", "score_range", "REAL DEFAULT 0.0")
+        _ensure_column(conn, "candidates", "compliance_issues", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -453,13 +464,18 @@ def get_unrouted_jd_artifacts(limit: int = 100) -> List[Dict[str, Any]]:
 
 def insert_candidate(candidate: Dict[str, Any]) -> str:
     cid = candidate.get("id") or ("cand_" + uuid.uuid4().hex[:16])
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO candidates (id, name, phone, email, source_types, raw_profile, enriched_profile,
-                                    jd_alignment_score, gold_score, risk_flags, overall_score, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO candidates (
+                id, name, phone, email, source_types, raw_profile, enriched_profile,
+                jd_alignment_score, gold_score, risk_flags, overall_score,
+                dimension_scores, evidence_binding, verification_questions,
+                level, confidence, company_analysis, needs_human_review,
+                score_range, compliance_issues, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 raw_profile=excluded.raw_profile,
                 enriched_profile=excluded.enriched_profile,
@@ -467,6 +483,15 @@ def insert_candidate(candidate: Dict[str, Any]) -> str:
                 gold_score=excluded.gold_score,
                 risk_flags=excluded.risk_flags,
                 overall_score=excluded.overall_score,
+                dimension_scores=excluded.dimension_scores,
+                evidence_binding=excluded.evidence_binding,
+                verification_questions=excluded.verification_questions,
+                level=excluded.level,
+                confidence=excluded.confidence,
+                company_analysis=excluded.company_analysis,
+                needs_human_review=excluded.needs_human_review,
+                score_range=excluded.score_range,
+                compliance_issues=excluded.compliance_issues,
                 updated_at=excluded.updated_at
             """,
             (
@@ -481,6 +506,15 @@ def insert_candidate(candidate: Dict[str, Any]) -> str:
                 candidate.get("gold_score", 0.0),
                 json.dumps(candidate.get("risk_flags", []), ensure_ascii=False),
                 candidate.get("overall_score", 0.0),
+                json.dumps(candidate.get("dimension_scores", {}), ensure_ascii=False),
+                json.dumps(candidate.get("evidence_binding", []), ensure_ascii=False),
+                json.dumps(candidate.get("verification_questions", []), ensure_ascii=False),
+                candidate.get("level", ""),
+                candidate.get("confidence", "medium"),
+                candidate.get("company_analysis", ""),
+                1 if candidate.get("needs_human_review") else 0,
+                candidate.get("score_range", 0.0),
+                json.dumps(candidate.get("compliance_issues", []), ensure_ascii=False),
                 now,
             ),
         )
@@ -567,7 +601,7 @@ def save_raw_file(record: Dict[str, Any]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-now_iso = lambda: datetime.datetime.utcnow().isoformat() + "Z"
+now_iso = lambda: datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
 
 
 def insert_mission(
@@ -620,6 +654,8 @@ def update_mission_state(mid: str, state: str, updates: Optional[Dict[str, Any]]
         "closed_at",
         "resume_state",
         "normalized_artifact_id",
+        "allocation_state",
+        "priority_score",
     }
     fields = ["state = ?, updated_at = ?"]
     params: List[Any] = [state, now_iso()]
@@ -635,14 +671,16 @@ def update_mission_state(mid: str, state: str, updates: Optional[Dict[str, Any]]
         conn.execute(f"UPDATE missions SET {', '.join(fields)} WHERE id = ?", params)
 
 
-def get_pending_missions() -> List[Dict[str, Any]]:
+def get_pending_missions(limit: int = 100) -> List[Dict[str, Any]]:
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT * FROM missions
             WHERE state NOT IN ('closed', 'problem_pending')
-            ORDER BY created_at DESC
-            """
+            ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
 

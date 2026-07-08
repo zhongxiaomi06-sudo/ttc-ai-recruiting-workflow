@@ -1,1 +1,94 @@
-{% extends "review_task.html" %}
+{% extends "base.html" %}
+{% block title %}合规仲裁 · {{ payload.candidate.name | default('候选人') }}{% endblock %}
+{% block content %}
+<div class="card red">
+  <span class="tag">任务类型：合规仲裁</span>
+  <span class="tag">任务 ID：{{ task.id }}</span>
+  {% if payload.title %}
+  <h2 style="margin-top:12px;">{{ payload.title }}</h2>
+  {% else %}
+  <h2 style="margin-top:12px;">候选人合规审查</h2>
+  {% endif %}
+  <p class="muted">Mission：{{ task.mission_id }}</p>
+</div>
+
+{% if payload.candidate %}
+<div class="card">
+  <h3>候选人信息</h3>
+  <table>
+    <tr><td style="width:120px;color:var(--heading)">姓名</td><td>{{ payload.candidate.name | default('未知') }}</td></tr>
+    <tr><td style="color:var(--heading)">评分</td><td><span class="score">{{ payload.candidate.overall_score | default('?') }}</span>（{{ payload.candidate.level | default('未知') }}）</td></tr>
+    <tr><td style="color:var(--heading)">数据来源</td><td>{{ payload.candidate.source_types | join(', ') if payload.candidate.source_types else '未知' }}</td></tr>
+  </table>
+</div>
+{% endif %}
+
+<div class="card yellow">
+  <h3>合规风险项</h3>
+  {% if payload.issues %}
+  <table>
+    <thead>
+      <tr>
+        <th>类型</th>
+        <th>严重程度</th>
+        <th>详情</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for issue in payload.issues %}
+      <tr>
+        <td><span class="tag">{{ issue.type }}</span></td>
+        <td>
+          {% if issue.severity == 'high' %}
+          <span style="color:var(--red)">🔴 高</span>
+          {% elif issue.severity == 'medium' %}
+          <span style="color:var(--yellow)">🟡 中</span>
+          {% else %}
+          <span style="color:var(--accent2)">🟢 低</span>
+          {% endif %}
+        </td>
+        <td>{{ issue.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">无具体风险项记录。</p>
+  {% endif %}
+</div>
+
+{% if payload.candidate.risk_flags %}
+<div class="card red">
+  <h3>候选人风险信号</h3>
+  <ul>
+    {% for rf in payload.candidate.risk_flags %}
+    <li>
+      <strong>{{ rf.flag if rf is mapping else rf }}</strong>
+      {% if rf is mapping and rf.severity %}
+      — <span style="color:{% if rf.severity == 'red' %}var(--red){% else %}var(--yellow){% endif %}">{{ rf.severity }}</span>
+      {% endif %}
+      {% if rf is mapping and rf.detail %}
+      <br><span class="muted">{{ rf.detail }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card yellow">
+  <h3>合规决策</h3>
+  <form method="post" action="/human/task/{{ task.id }}/complete">
+    <div class="radio-group">
+      <label><input type="radio" name="outcome" value="approved" required> 通过（风险可控，允许继续）</label>
+      <label><input type="radio" name="outcome" value="rejected"> 驳回（风险过高，排除该候选人）</label>
+      <label><input type="radio" name="outcome" value="need_more_info"> 需要更多信息</label>
+    </div>
+
+    <label for="notes">合规意见</label>
+    <textarea id="notes" name="notes" placeholder="说明合规判断依据和处理方式"></textarea>
+
+    <button type="submit" class="btn">提交合规决策</button>
+  </form>
+</div>
+{% endblock %}
