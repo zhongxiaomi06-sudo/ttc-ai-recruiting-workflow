@@ -515,10 +515,12 @@ export TTC_LLM_API_KEY=sk-...
 <div class="todo done"><div class="chk"></div><div class="txt">自动化读取飞书 / ChatGPT / candidate-collector 输入</div></div>
 <div class="todo done"><div class="chk"></div><div class="txt">本地 TTC Daemon（FastAPI + SQLite + 链路读取）可运行</div></div>
 <div class="todo done"><div class="chk"></div><div class="txt">输出 AI 主导 + 人机调度架构 HTML</div></div>
-<div class="todo"><div class="chk"></div><div class="txt">实现 Orchestrator 状态机与 Agent 编排骨架</div></div>
-<div class="todo"><div class="chk"></div><div class="txt">实现 HTML 猎头电话任务页与 Dashboard</div></div>
-<div class="todo"><div class="chk"></div><div class="txt">对接公司人才库 API 后跑通端到端 Mission</div></div>
+<div class="todo done"><div class="chk"></div><div class="txt">实现 Orchestrator 状态机与 Agent 编排骨架</div></div>
+<div class="todo done"><div class="chk"></div><div class="txt">实现 HTML 猎头电话任务页、问题任务页与 Dashboard</div></div>
+<div class="todo done"><div class="chk"></div><div class="txt">对接云端 Source MySQL 人才库并跑通端到端 Mission</div></div>
+<div class="todo done"><div class="chk"></div><div class="txt">read_job / raw_ingest / artifact_classifier / normalized_artifact / mission_router 闭环落地</div></div>
 <div class="todo"><div class="chk"></div><div class="txt">接入真实 GoldScoreEngine / TalentMatch 评分</div></div>
+<div class="todo"><div class="chk"></div><div class="txt">把 Dashboard 和任务页放到服务器认证网关后面</div></div>
 
 <!-- ====== 11. 成熟工具复用与 Source 人才库 ====== -->
 <h2>11. 成熟工具复用与 Source 人才库</h2>
@@ -543,9 +545,16 @@ export TTC_LLM_API_KEY=sk-...
 </table>
 
 <h3>11.1 Source 公司数据作为独立人才库</h3>
-<p>Source 公司数据接入 <span class="inline">sourcing_agent</span>，与公司人才库和 candidate-collector 并列召回。短期支持本地 JSON 导出，长期支持 Source 人才库 API。</p>
+<p>Source 公司数据接入 <span class="inline">sourcing_agent</span>，与公司人才库和 candidate-collector 并列召回。当前支持 MySQL/RDS、JSON 导出和 API 三种形态。</p>
 <div class="code">export TTC_SOURCE_TALENT_ENABLED=true
 export TTC_SOURCE_TALENT_FILE=/path/to/source-candidates.json
+
+# 或 MySQL/RDS
+export TTC_MYSQL_HOST=121.40.2.48
+export TTC_MYSQL_PORT=3306
+export TTC_MYSQL_DATABASE=recruit_bot
+export TTC_MYSQL_USER=ttc_reader
+export TTC_MYSQL_PASSWORD=***
 
 # 或 API
 export TTC_SOURCE_TALENT_URL=https://source-talent.example.com
@@ -577,6 +586,44 @@ export TTC_SOURCE_TALENT_QUERY_PATH=/api/candidates/search</div>
     <tr><td>恢复动作</td><td>人工提交后读取 resume_action，恢复 read_job、artifact 或 Mission 原状态。</td></tr>
   </tbody>
 </table>
+
+<!-- ====== 13. 当前接口与跑通结果 ====== -->
+<h2>13. 当前接口与跑通结果</h2>
+
+<div class="card ok">
+  <div class="lbl">已跑通</div>
+  <p>本地 Daemon 使用 <span class="inline">scripts/run_local_daemon.sh</span> 启动，加载云端 Source MySQL 后，AI 产品经理 JD 可完成：读取 → 分类 → 归一化 → 创建 Mission → 云库召回 → 评分 → 生成电话任务。</p>
+</div>
+
+<table>
+  <thead><tr><th>接口</th><th>用途</th><th>状态</th></tr></thead>
+  <tbody>
+    <tr><td><span class="inline">POST /ingest/feishu</span></td><td>提交飞书/JD/手工文本，进入 read_job</td><td>已验证</td></tr>
+    <tr><td><span class="inline">GET /ingest/read-link</span></td><td>提交 URL/ChatGPT 分享页读取任务</td><td>已接入读取诊断</td></tr>
+    <tr><td><span class="inline">POST /ingest/resume</span></td><td>提交候选人 JSON/简历结构</td><td>已验证</td></tr>
+    <tr><td><span class="inline">GET /admin/source-talent</span></td><td>检查 Source JSON/MySQL 是否启用和可召回</td><td>已验证 mysql_sample_count</td></tr>
+    <tr><td><span class="inline">GET /dashboard</span></td><td>查看 Mission、电话任务、异常任务</td><td>已验证</td></tr>
+    <tr><td><span class="inline">GET /human/task/{id}</span></td><td>HTML 电话任务/问题任务页</td><td>已验证结构化字段</td></tr>
+    <tr><td><span class="inline">POST /human/task/{id}/complete</span></td><td>提交电话反馈或异常恢复结果</td><td>已接入 resume_action</td></tr>
+  </tbody>
+</table>
+
+<div class="code"># 本地 smoke 预期
+read_job: succeeded
+artifact: jd / mission_created
+mission: created → jd_parsed → sourcing → scored → human_pending
+source_company_db: 召回候选人
+call_list: 生成电话清单
+human_tasks: 生成 phone_caller 任务</div>
+
+<div class="card warn">
+  <div class="lbl">已发现并处理的边界</div>
+  <ul>
+    <li>本机代理会导致 localhost curl/fetch 出现 502；命令行使用 <span class="inline">curl --noproxy "*"</span>，后端 requests 对本地 collector 禁用环境代理。</li>
+    <li>非技术岗位如“总裁助理 JD”会自动清洗为“总裁助理”，并扩展总助/董事长助理/CEO助理/高管助理/秘书/行政等搜索词；若云库仍为 0，则进入 source_help 任务。</li>
+    <li>测试控制台已支持输入 API Token，并在 read-link、feishu、resume 三类提交中自动带上 <span class="inline">X-TTC-Token</span>。</li>
+  </ul>
+</div>
 
 </div>
 </body>

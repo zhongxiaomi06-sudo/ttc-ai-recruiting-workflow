@@ -7,12 +7,14 @@
     在这里快速提交真实输入，观察 AI 自动推进 Mission 和生成人类任务。
     生产环境请关闭此页面或加上访问控制。
   </p>
+  <label for="api-token">API Token（如果服务设置了 TTC_API_TOKEN）</label>
+  <input id="api-token" name="api-token" type="password" placeholder="localtest / 服务器 token">
 </div>
 
 <div class="grid">
   <div class="card">
     <h3>1. 提交网页 / ChatGPT 链接</h3>
-    <form action="/ingest/read-link" method="get">
+    <form action="/ingest/read-link" method="get" id="read-link-form">
       <label for="url">URL</label>
       <input id="url" name="url" type="url" placeholder="https://chatgpt.com/share/..." required>
       <button type="submit" class="btn">创建 read_job</button>
@@ -63,6 +65,32 @@
 </div>
 
 <script>
+  const tokenInput = document.getElementById('api-token');
+  tokenInput.value = localStorage.getItem('ttc_api_token') || '';
+  tokenInput.addEventListener('input', () => {
+    localStorage.setItem('ttc_api_token', tokenInput.value.trim());
+  });
+
+  function authHeaders(extra) {
+    const headers = Object.assign({}, extra || {});
+    const token = tokenInput.value.trim();
+    if (token) headers['X-TTC-Token'] = token;
+    return headers;
+  }
+
+  function showResult(data) {
+    alert('结果：' + JSON.stringify(data, null, 2));
+  }
+
+  document.getElementById('read-link-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const url = document.getElementById('url').value.trim();
+    fetch('/ingest/read-link?url=' + encodeURIComponent(url), {
+      method: 'GET',
+      headers: authHeaders()
+    }).then(r => r.json()).then(showResult).catch(err => alert('提交失败：' + err));
+  });
+
   // 让表单以 JSON 提交 resume
   document.getElementById('resume-form').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -75,7 +103,7 @@
     }
     fetch('/ingest/resume', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify({candidate: JSON.parse(textarea.value)})
     }).then(r => r.json()).then(data => {
       alert('已提交：' + JSON.stringify(data, null, 2));
@@ -90,10 +118,7 @@
     fd.forEach((v, k) => body[k] = v);
     fetch('/ingest/feishu', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-TTC-Token': ''
-      },
+      headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify(body)
     }).then(r => r.json()).then(data => {
       alert('已提交：' + JSON.stringify(data, null, 2));
