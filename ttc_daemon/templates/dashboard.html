@@ -50,14 +50,13 @@
 <body>
   <header>
     <h1>TTC AI 猎头工作台</h1>
-    <p>AI 主导 · 人类作为工具 · 所有任务以 HTML 页面交付</p>
   </header>
 
   <div class="container">
 
     <div class="card green">
       <strong>系统状态</strong>
-      <span class="muted">运行中 · {{ missions | length }} 个 Mission · {{ pending_tasks | length }} 个待办人类任务</span>
+      <span class="muted">运行中 · {{ missions | length }} 个任务 · {{ pending_tasks | length }} 个待办人类任务</span>
     </div>
 
     <h2>待办人类任务</h2>
@@ -68,7 +67,7 @@
           <th>任务 ID</th>
           <th>类型</th>
           <th>角色</th>
-          <th>Mission</th>
+          <th>任务</th>
           <th>状态</th>
           <th>操作</th>
         </tr>
@@ -90,12 +89,12 @@
     <p class="muted">暂无待办人类任务。</p>
     {% endif %}
 
-    <h2>进行中的 Mission</h2>
+    <h2>进行中的任务</h2>
     {% if missions %}
     <table>
       <thead>
         <tr>
-          <th>Mission ID</th>
+          <th>任务 ID</th>
           <th>JD 来源</th>
           <th>状态</th>
           <th>候选人</th>
@@ -117,12 +116,12 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted">暂无 Mission。</p>
+    <p class="muted">暂无任务。</p>
     {% endif %}
 
     <h2>快速操作</h2>
     <form action="/mission/start" method="post" style="display:inline;">
-      <button type="submit" class="btn">从最新 JD 启动 Mission</button>
+      <button type="submit" class="btn">从最新 JD 启动任务</button>
     </form>
 
   </div>

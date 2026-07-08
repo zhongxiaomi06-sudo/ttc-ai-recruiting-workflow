@@ -5,7 +5,7 @@
   <span class="tag">AI 异常 / 信息缺失</span>
   <span class="tag">任务类型：{{ task.task_type }}</span>
   <h2 style="margin-top:12px;">AI 在“{{ payload.resume_state | default('未知') }}”步骤遇到了问题</h2>
-  <p class="muted">Mission：{{ task.mission_id }} · 任务 ID：{{ task.id }}</p>
+  <p class="muted">任务：{{ task.mission_id }} · 任务 ID：{{ task.id }}</p>
 </div>
 
 <div class="card">
@@ -42,7 +42,7 @@
     <label>处理方式</label>
     <div class="radio-group">
       <label><input type="radio" name="outcome" value="resolved" required> 已解决，AI 可继续</label>
-      <label><input type="radio" name="outcome" value="cannot_resolve"> 无法解决，终止该 Mission</label>
+      <label><input type="radio" name="outcome" value="cannot_resolve"> 无法解决，终止该任务</label>
     </div>
 
     {% if task.task_type in ['empty_content', 'read_failed', 'login_required'] %}

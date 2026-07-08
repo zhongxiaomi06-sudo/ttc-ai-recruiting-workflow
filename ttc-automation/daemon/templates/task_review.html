@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}顾问审核 - TTC{% endblock %}
+{% block content %}
+
+<h2>顾问审核任务 <span class="tag">{{ task.status }}</span></h2>
+
+<div class="card warn">
+  <div class="lbl">触发原因</div>
+  <p>{{ payload.reason or '高分候选存在风险或冲突' }}</p>
+</div>
+
+<div class="card info">
+  <div class="lbl">JD 摘要</div>
+  <p><strong>公司</strong>: {{ jd_struct.company or '-' }}</p>
+  <p><strong>岗位</strong>: {{ jd_struct.position or '-' }}</p>
+  <p><strong>技能</strong>: {{ (jd_struct.skills or []) | join(', ') }}</p>
+</div>
+
+{% if payload.top_candidate %}
+<div class="card">
+  <div class="lbl">Top 候选</div>
+  <p><strong>姓名</strong>: {{ payload.top_candidate.candidate.name or payload.top_candidate.candidate.candidate_name or '未知' }}</p>
+  <p><strong>综合分</strong>: {{ payload.top_candidate.overall_score }}</p>
+  <p><strong>JD 匹配</strong>: {{ payload.top_candidate.jd_alignment }} <strong>含金量</strong>: {{ payload.top_candidate.gold_score }}</p>
+  <p class="risk"><strong>风险信号</strong>: {{ (payload.top_candidate.risk_flags or []) | join(', ') or '无' }}</p>
+</div>
+{% endif %}
+
+<h3>决策</h3>
+<form method="post" action="/human/task/{{ task.id }}/submit">
+  <label>审核结论</label>
+  <select name="decision" required>
+    <option value="proceed">继续推进（进入打电话阶段）</option>
+    <option value="reject">终止该任务</option>
+    <option value="need_more">需要补充信息</option>
+  </select>
+
+  <label>顾问备注</label>
+  <textarea name="notes" placeholder="补充说明、客户反馈、调整建议"></textarea>
+
+  <button type="submit" class="btn">提交审核</button>
+</form>
+
+{% endblock %}

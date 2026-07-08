@@ -14,10 +14,12 @@ from pydantic import BaseModel, Field
 from . import db, scheduler
 from .agents import human_dispatch
 from .config import API_TOKEN, DAEMON_HOST, DAEMON_PORT
+from .monitoring import init_sentry, sentry_status
 from .pipeline import run_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+init_sentry()
 
 
 def require_api_token(x_ttc_token: Optional[str] = Header(default=None)) -> None:
@@ -303,6 +305,39 @@ def get_call_list(status: Optional[str] = None, limit: int = 100):
     return {"ok": True, "count": len(rows), "items": rows}
 
 
+@app.get("/api/missions")
+def list_missions(limit: int = 100):
+    """JSON Mission 列表，供 TalentMatch 风格 workflow 前端使用。"""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM missions
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        for key in ["jd_fields", "candidate_ids", "call_list_ids", "human_task_ids", "config"]:
+            if item.get(key):
+                try:
+                    item[key] = json.loads(item[key])
+                except Exception:
+                    pass
+        items.append(item)
+    return {"ok": True, "count": len(items), "items": items}
+
+
+@app.post("/api/human/task/{tid}/complete", dependencies=[Depends(require_api_token)])
+async def complete_human_task_json(tid: str, request: Request):
+    """JSON 版任务完成接口，供 React workflow 页面调用。"""
+    result = await request.json()
+    human_dispatch.complete_task(tid, {k: str(v) for k, v in result.items()})
+    return {"ok": True, "task_id": tid}
+
+
 @app.post("/feedback", dependencies=[Depends(require_api_token)])
 def feedback(payload: FeedbackPayload):
     fb = payload.model_dump()
@@ -426,6 +461,16 @@ def admin_retry_read_job(jid: str):
 @app.get("/health")
 def health():
     return {"ok": True, "service": "ttc-daemon", "version": "0.3.0"}
+
+
+@app.get("/api/monitoring/status")
+def monitoring_status():
+    return {"ok": True, "sentry": sentry_status()}
+
+
+@app.post("/api/monitoring/sentry-test", dependencies=[Depends(require_api_token)])
+def sentry_test():
+    raise RuntimeError("TTC Sentry test event")
 
 
 # ---------------------------------------------------------------------------

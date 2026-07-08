@@ -507,6 +507,10 @@ export TTC_TALENT_DB_ENABLED=true
 export TTC_TALENT_DB_URL=https://your-talent-db.example.com
 export TTC_TALENT_DB_KEY=your-api-key
 export TTC_LLM_API_KEY=sk-...
+export TTC_SCORING_PROVIDER=heuristic  # heuristic / talentmatch / goldscore / llm / auto
+export TTC_TALENTMATCH_PATH=/opt/talentmatch
+export TTC_GOLDSCORE_URL=              # 可选：外部 GoldScoreEngine 服务
+export TTC_GOLDSCORE_LOCAL_ENABLED=false
 </div>
 
 <!-- ====== 10. 当前状态与下一步 ====== -->
@@ -519,8 +523,90 @@ export TTC_LLM_API_KEY=sk-...
 <div class="todo done"><div class="chk"></div><div class="txt">实现 HTML 猎头电话任务页、问题任务页与 Dashboard</div></div>
 <div class="todo done"><div class="chk"></div><div class="txt">对接云端 Source MySQL 人才库并跑通端到端 Mission</div></div>
 <div class="todo done"><div class="chk"></div><div class="txt">read_job / raw_ingest / artifact_classifier / normalized_artifact / mission_router 闭环落地</div></div>
-<div class="todo"><div class="chk"></div><div class="txt">接入真实 GoldScoreEngine / TalentMatch 评分</div></div>
+<div class="todo done"><div class="chk"></div><div class="txt">通过 provider/adapter 接入 TalentMatch UnifiedMatchEngine / GoldScoreEngine 外部服务或本地模块 / LLM 评分，不改变 Mission 主状态机</div></div>
 <div class="todo"><div class="chk"></div><div class="txt">把 Dashboard 和任务页放到服务器认证网关后面</div></div>
+
+<div class="card warn">
+  <div class="lbl">当前主方案锁定</div>
+  <p>本方案的基层架构不再改变：<span class="inline">read_jobs → raw_ingest → artifact_classifier → normalized_artifacts → mission_router → Mission Orchestrator → human/problem task</span> 是唯一主链路。后续所有成熟能力只作为 provider、adapter 或子模块接入，不重写状态机，不绕过分类路由，不另起并行 Daemon。</p>
+</div>
+
+<div class="card info">
+  <div class="lbl">部署形态锁定</div>
+  <p>正式部署到 TalentMatch 服务器，使用 TalentMatch 的视觉风格、色彩体系、布局和组件语言，为方案四单独做 workflow 页面。TTC Daemon 作为后端子系统运行在 <span class="inline">127.0.0.1:8766</span>，由 nginx 暴露为 <span class="inline">https://yorkteam.cn/api/ttc/*</span>。现有 TalentMatch <span class="inline">/api/*</span> 不改、不替换。</p>
+</div>
+
+<table>
+  <thead><tr><th>能力来源</th><th>接入方式</th><th>不改变的边界</th></tr></thead>
+  <tbody>
+    <tr><td><strong>TalentMatch / GoldScoreEngine / LLM</strong></td><td>替换 scoring_agent 内部 provider，返回 overall_score、risk_flags、evidence、verification_questions</td><td>不替换 Mission 状态机，不直接创建电话任务</td></tr>
+    <tr><td><strong>TalentMatch parser</strong></td><td>作为 JD/简历解析增强器，补全结构化字段</td><td>不跳过 artifact_classifier 和 normalized_artifacts</td></tr>
+    <tr><td><strong>TalentMatch feedback_learner</strong></td><td>接收电话反馈、客户反馈、顾问校准，沉淀到 feedback 表</td><td>不改变 human_task 的提交入口</td></tr>
+    <tr><td><strong>TalentMatch Feishu Bot</strong></td><td>替换通知层，发送任务卡片和反馈卡片</td><td>不让飞书 Bot 成为新的业务状态中心</td></tr>
+    <tr><td><strong>TalentMatch 风格 React 前端</strong></td><td>新增适配方案四的 AI 工作流页面，调用 /api/ttc/* 展示 Mission、human_task、电话反馈、异常恢复</td><td>不硬套现有 TalentMatch 页面，不新建独立前端</td></tr>
+    <tr><td><strong>plugins / MCP</strong></td><td>未来把 Daemon API 暴露给 Codex/Claude 调用</td><td>等主链路稳定后再做，不进入当前 P0</td></tr>
+  </tbody>
+</table>
+
+<h3>10.1 现在应该做什么</h3>
+<div class="phase-grid">
+  <div class="phase">
+    <div class="num">Step 1 · 对齐基线</div>
+    <h4>先同步远端最新方案四实现</h4>
+    <ul>
+      <li>保护当前本地改动，避免覆盖未提交文件。</li>
+      <li>以 <span class="inline">origin/main</span> 最新提交为审计基线。</li>
+      <li>确认 P0/P1/P2 修复是否真实存在并测试通过。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="num">Step 2 · 修主闭环</div>
+    <h4>只修阻断 Mission 完成的点</h4>
+    <ul>
+      <li>电话任务全部完成后，Mission 必须进入 feedback/closed。</li>
+      <li>problem_pending 必须保存 resume_state 和 resume_action。</li>
+      <li>read_job 重试、人工补正文、人工分类必须能恢复原流程。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="num">Step 3 · 接成熟评分</div>
+    <h4>用 provider 替换占位评分</h4>
+    <ul>
+      <li>scoring_provider 已支持 <span class="inline">talentmatch</span>、<span class="inline">goldscore</span>、<span class="inline">llm</span>、<span class="inline">auto</span>。</li>
+      <li><span class="inline">goldscore</span> 优先调用外部 GoldScoreEngine URL；开启本地开关后尝试 TalentMatch 本地 <span class="inline">matching/gold_score_engine.py</span>。</li>
+      <li>失败时回退当前启发式评分，保证 Daemon 不崩。</li>
+      <li>评分结果必须带证据、风险、追问题，供电话任务页直接使用。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="num">Step 4 · 迁入主仓</div>
+    <h4>把方案四归位到 talentmatch-recruit</h4>
+    <ul>
+      <li>先作为顶层 <span class="inline">ttc-automation/</span> 迁入，不拆进 TalentMatch 内部。</li>
+      <li>迁入后再逐步复用 parser、matching、feedback、feishu。</li>
+      <li>不要把临时插件草案作为 P0 一起合并。</li>
+    </ul>
+  </div>
+  <div class="phase">
+    <div class="num">Step 5 · 部署上线</div>
+    <h4>部署到 TalentMatch 服务器</h4>
+    <ul>
+      <li>TTC Daemon 以内网服务运行在 <span class="inline">127.0.0.1:8766</span>。</li>
+      <li>nginx 新增 <span class="inline">/api/ttc/</span> 代理，不影响 <span class="inline">/api/</span>。</li>
+      <li>React 新增 AI 工作流入口，使用 TalentMatch 风格，但页面结构适配 Mission、任务、异常和反馈。</li>
+    </ul>
+  </div>
+</div>
+
+<div class="code"># 推荐执行顺序
+git status
+# 1. 先备份当前本地改动：commit 到临时分支，或导出 patch
+# 2. 同步远端最新 origin/main，作为真实基线
+# 3. 跑测试：compileall + Mission smoke + human_task lifecycle
+# 4. 修 P0：phone_call 完成、resume_state、scoring_provider
+# 5. 再迁入 talentmatch-recruit/ttc-automation/
+# 6. 部署到 47.110.93.137：/api/ttc/* → 127.0.0.1:8766
+</div>
 
 <!-- ====== 11. 成熟工具复用与 Source 人才库 ====== -->
 <h2>11. 成熟工具复用与 Source 人才库</h2>

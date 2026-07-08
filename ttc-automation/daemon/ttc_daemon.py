@@ -1,123 +1,38 @@
-"""TTC Local Daemon: central hub for the AI headhunter automation workflow.
+"""TTC Local Daemon: FastAPI app + Orchestrator integration.
 
-Receives inputs from:
-- TTC-Feishu Bridge userscript
-- TTC-ChatGPT Reader userscript
-- candidate-collector webhook / polling
-- Manual API calls
+Run:
+    python ttc_daemon.py
 
-Stores everything locally under data/ with full auditability.
+Default: http://127.0.0.1:8766
 """
 
-import hashlib
 import json
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime
+import os
 from pathlib import Path
 from typing import Any, Optional
 
 import uvicorn
-from fastapi import FastAPI, Query
+from dotenv import load_dotenv
+from fastapi import FastAPI, Form, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-for sub in ("feishu", "links", "resumes", "pipeline"):
-    (DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
+# Load .env from project root (ttc-automation/.env)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv()
 
-DB_PATH = DATA_DIR / "ttc.db"
-
-# ---------------------------------------------------------------------------
-# DB
-# ---------------------------------------------------------------------------
-
-@contextmanager
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def init_db():
-    with get_db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS records (
-                record_id TEXT PRIMARY KEY,
-                source_type TEXT NOT NULL,
-                source_url TEXT,
-                title TEXT,
-                content TEXT,
-                markdown TEXT,
-                collected_at TEXT,
-                content_hash TEXT,
-                access_basis TEXT DEFAULT 'user_authorized',
-                confidence TEXT DEFAULT '中',
-                extracted_fields TEXT,
-                feedback TEXT,
-                processed INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.commit()
-
-
-def make_record_id(prefix: str) -> str:
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    rand = hashlib.sha256(str(datetime.utcnow().timestamp()).encode()).hexdigest()[:6]
-    return f"{prefix}_{ts}_{rand}"
-
-
-def insert_record(data: dict[str, Any]) -> str:
-    record_id = make_record_id(data.get("source_type", "rec"))
-    content = data.get("content") or data.get("text") or ""
-    if not isinstance(content, str):
-        content = json.dumps(content, ensure_ascii=False)
-    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-    extracted = data.get("extracted_fields")
-    if isinstance(extracted, dict):
-        extracted = json.dumps(extracted, ensure_ascii=False)
-
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO records
-            (record_id, source_type, source_url, title, content, markdown, collected_at,
-             content_hash, access_basis, confidence, extracted_fields)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                record_id,
-                data.get("source_type", "unknown"),
-                data.get("source_url"),
-                data.get("title"),
-                content,
-                data.get("markdown"),
-                data.get("collected_at") or datetime.utcnow().isoformat() + "Z",
-                content_hash,
-                data.get("access_basis", "user_authorized"),
-                data.get("confidence", "中"),
-                extracted,
-            ),
-        )
-        conn.commit()
-    return record_id
-
+import db
+from agents import record_agent_run
+from html_render import render_dashboard, render_human_task, render_mission
+from link_reader import read_link
+from orchestrator import advance_mission, ingest_and_route, start_orchestrator
+from source_talent import status as source_talent_status
 
 # ---------------------------------------------------------------------------
-# FastAPI app
+# App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="TTC Daemon", version="0.1.0")
+app = FastAPI(title="TTC Daemon", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -126,6 +41,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+API_TOKEN = os.getenv("TTC_API_TOKEN")
+PUBLIC_PATHS = {"/dashboard", "/status", "/records", "/api/call-list"}
+PUBLIC_PREFIXES = ("/mission/", "/human/task/")
+
+
+@app.middleware("http")
+async def api_token_check(request: Request, call_next):
+    if API_TOKEN and request.method != "OPTIONS":
+        path = request.url.path
+        if not (
+            path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES)
+        ):
+            if request.headers.get("X-TTC-Token") != API_TOKEN:
+                return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
+@app.on_event("startup")
+def startup():
+    db.init_db()
+    start_orchestrator()
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +76,8 @@ class FeishuIngest(BaseModel):
     source_url: Optional[str] = None
     title: Optional[str] = None
     content: Any
+    markdown: Optional[str] = None
     selected: bool = False
-    user_agent: Optional[str] = None
     captured_at: Optional[str] = None
 
 
@@ -165,63 +105,175 @@ class PipelineRun(BaseModel):
     min_score: int = Field(default=50, ge=0, le=100)
 
 
-class Feedback(BaseModel):
-    record_id: str
-    outcome: str  # contacted / interviewed / offered / hired / rejected
-    notes: Optional[str] = None
-
-
 # ---------------------------------------------------------------------------
-# Endpoints
+# Ingest endpoints
 # ---------------------------------------------------------------------------
-@app.on_event("startup")
-def startup():
-    init_db()
-
-
-@app.get("/status")
-def status():
-    with get_db() as conn:
-        counts = {
-            "total": conn.execute("SELECT COUNT(*) FROM records").fetchone()[0],
-            "feishu": conn.execute(
-                "SELECT COUNT(*) FROM records WHERE source_type LIKE 'feishu%'"
-            ).fetchone()[0],
-            "chatgpt": conn.execute(
-                "SELECT COUNT(*) FROM records WHERE source_type = 'chatgpt_share'"
-            ).fetchone()[0],
-            "resumes": conn.execute(
-                "SELECT COUNT(*) FROM records WHERE source_type = 'resume'"
-            ).fetchone()[0],
-        }
-    return {"ok": True, "data_dir": str(DATA_DIR), "counts": counts}
-
-
 @app.post("/ingest/feishu")
-def ingest_feishu(payload: FeishuIngest):
-    record_id = insert_record(payload.dict())
-    return {"ok": True, "record_id": record_id, "message": "feishu content ingested"}
+async def ingest_feishu(payload: FeishuIngest):
+    data = payload.dict()
+    data["markdown"] = data.get("markdown") or (data.get("content") if isinstance(data.get("content"), str) else None)
+    result = await ingest_and_route(data)
+    return {"ok": True, **result}
 
 
 @app.post("/ingest/link")
-def ingest_link(payload: LinkIngest):
-    record_id = insert_record(payload.dict())
-    return {"ok": True, "record_id": record_id, "message": "link content ingested"}
+async def ingest_link(payload: LinkIngest):
+    data = payload.dict()
+    data["markdown"] = data.get("markdown") or (data.get("content") if isinstance(data.get("content"), str) else None)
+    result = await ingest_and_route(data)
+    return {"ok": True, **result}
 
 
 @app.post("/ingest/resume")
-def ingest_resume(payload: ResumeIngest):
+async def ingest_resume(payload: ResumeIngest):
     data = {
         "source_type": "resume",
         "source_url": payload.source_url,
         "title": f"Resume: {payload.candidate_name}",
         "content": payload.resume_text,
         "markdown": payload.resume_text,
-        "collected_at": payload.captured_at,
+        "captured_at": payload.captured_at,
         "access_basis": "user_authorized",
     }
-    record_id = insert_record(data)
-    return {"ok": True, "record_id": record_id, "message": "resume ingested"}
+    result = await ingest_and_route(data)
+    return {"ok": True, **result}
+
+
+@app.post("/link/read")
+async def read_link_endpoint(url: str, use_playwright: bool = False):
+    result = await read_link(url, use_playwright=use_playwright)
+    result["source_url"] = url
+    route_result = await ingest_and_route(result)
+    return {"ok": True, "link_result": result, "route": route_result}
+
+
+@app.get("/ingest/read-link")
+async def ingest_read_link(url: str, use_playwright: bool = False):
+    """GET alias for /link/read, used by browser extension and testing console."""
+    return await read_link_endpoint(url, use_playwright=use_playwright)
+
+
+@app.get("/admin/source-talent")
+def admin_source_talent():
+    return {"ok": True, "source_talent": source_talent_status()}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard / Mission / Human Task HTML pages
+# ---------------------------------------------------------------------------
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    missions = db.list_missions(limit=100)
+    tasks = db.list_human_tasks(limit=100)
+    return HTMLResponse(render_dashboard(missions, tasks))
+
+
+@app.get("/mission/{mission_id}", response_class=HTMLResponse)
+def mission_page(mission_id: str):
+    mission = db.get_mission(mission_id)
+    if not mission:
+        return HTMLResponse("Mission not found", status_code=404)
+    artifact = db.get_artifact(mission["artifact_id"]) or {}
+    tasks = db.list_human_tasks(mission_id=mission_id)
+    runs = db.list_agent_runs(mission_id=mission_id)
+    return HTMLResponse(render_mission(mission, artifact, tasks, runs))
+
+
+@app.get("/human/task/{task_id}", response_class=HTMLResponse)
+def human_task_page(task_id: str):
+    task = db.get_human_task(task_id)
+    if not task:
+        return HTMLResponse("Task not found", status_code=404)
+    mission = db.get_mission(task["mission_id"]) or {}
+    return HTMLResponse(render_human_task(task, mission))
+
+
+@app.post("/human/task/{task_id}/complete")
+async def complete_human_task(task_id: str, request: Request):
+    body = await request.body()
+    try:
+        data = json.loads(body)
+    except Exception:
+        data = dict(await request.form())
+    return await _process_task_completion(task_id, data)
+
+
+async def _process_task_completion(task_id: str, result: dict):
+    task = db.get_human_task(task_id)
+    if not task:
+        return JSONResponse({"ok": False, "error": "Task not found"}, status_code=404)
+
+    db.update_human_task(task_id, {
+        "status": "completed",
+        "result_json": json.dumps(result, ensure_ascii=False),
+        "completed_at": db.now_iso(),
+    })
+
+    mission = db.get_mission(task["mission_id"])
+    if not mission:
+        return JSONResponse({"ok": True, "message": "Task completed, mission gone"})
+
+    if task["task_type"] == "problem_solve":
+        resolution = result.get("resolution")
+        if resolution == "fixed":
+            resume_state = mission.get("resume_state") or "created"
+            db.update_mission(mission["id"], {"status": resume_state, "problem_reason": None})
+            await advance_mission(mission["id"])
+        elif resolution == "skip":
+            next_states = {
+                "created": "jd_parsed",
+                "jd_parsed": "sourcing",
+                "sourcing": "scored",
+                "scored": "calling",
+            }
+            db.update_mission(mission["id"], {"status": next_states.get(mission["status"], "closed")})
+            await advance_mission(mission["id"])
+        else:
+            db.update_mission(mission["id"], {"status": "closed"})
+    elif task["task_type"] == "client_review":
+        decision = result.get("decision")
+        if decision == "proceed":
+            db.update_mission(mission["id"], {"status": "calling"})
+            await advance_mission(mission["id"])
+        elif decision == "need_more":
+            db.update_mission(mission["id"], {"status": "problem_pending", "problem_reason": "need_more_info"})
+        else:
+            db.update_mission(mission["id"], {"status": "closed"})
+
+    return JSONResponse({"ok": True, "message": "Task completed", "task_id": task_id})
+
+
+@app.post("/human/task/{task_id}/submit")
+async def submit_human_task(task_id: str, request: Request):
+    form = await request.form()
+    response = await _process_task_completion(task_id, dict(form))
+    if isinstance(response, JSONResponse):
+        return response
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
+        <html><head><title>已提交</title></head>
+        <body style="background:#0a0a0f;color:#c8c8d4;font-family:sans-serif;padding:40px;">
+        <h2>反馈已提交</h2>
+        <p><a href="/dashboard" style="color:#00cec9;">返回 Dashboard</a></p>
+        </body></html>"""
+    )
+
+
+# ---------------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------------
+@app.get("/status")
+def status():
+    return {
+        "ok": True,
+        "data_dir": str(db.DATA_DIR),
+        "counts": {
+            "missions": db._conn().execute("SELECT COUNT(*) FROM missions").fetchone()[0],
+            "human_tasks": db._conn().execute("SELECT COUNT(*) FROM human_tasks").fetchone()[0],
+            "artifacts": db._conn().execute("SELECT COUNT(*) FROM artifacts").fetchone()[0],
+            "read_jobs": db._conn().execute("SELECT COUNT(*) FROM read_jobs").fetchone()[0],
+        },
+    }
 
 
 @app.get("/records")
@@ -230,68 +282,35 @@ def list_records(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    with get_db() as conn:
-        sql = "SELECT * FROM records"
-        params = []
-        if source_type:
-            sql += " WHERE source_type = ?"
-            params.append(source_type)
-        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        rows = conn.execute(sql, params).fetchall()
-    return {"ok": True, "records": [dict(r) for r in rows]}
-
-
-@app.post("/link/read")
-async def read_link_endpoint(url: str, use_playwright: bool = False):
-    """Server-side link reader. Uses Playwright for ChatGPT share links."""
-    from link_reader import read_link
-
-    result = await read_link(url, use_playwright=use_playwright)
-    record_id = insert_record(result)
-    return {"ok": True, "record_id": record_id, "result": result}
+    # Backward-compatible alias: return artifacts
+    arts = db.list_artifacts(artifact_type=source_type, limit=limit)
+    return {"ok": True, "records": arts, "offset": offset}
 
 
 @app.post("/pipeline/run")
 def run_pipeline(req: PipelineRun):
-    """Placeholder orchestration endpoint.
-
-    Real implementation will:
-    1. Parse JD into structured query.
-    2. Query company talent DB and candidate-collector.
-    3. Enrich each candidate from open web.
-    4. Score and rank.
-    5. Return call list.
-    """
-    # TODO: integrate TalentMatch / GoldScore / talent DB gateway
     return {
         "ok": True,
-        "message": "pipeline stub executed",
+        "message": "pipeline stub: use /ingest/feishu or /ingest/link to create a Mission",
         "record_id": req.record_id,
         "jd_snippet": (req.jd_text or "")[:200],
-        "next": "integrate talent_db_gateway + scoring engine",
     }
 
 
 @app.get("/api/call-list")
 def call_list(limit: int = 20):
-    """Placeholder call list."""
-    return {
-        "ok": True,
-        "candidates": [],
-        "message": "call-list placeholder: integrate with scoring engine",
-    }
-
-
-@app.post("/feedback")
-def post_feedback(feedback: Feedback):
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE records SET feedback = ?, processed = 1 WHERE record_id = ?",
-            (json.dumps(feedback.dict(), ensure_ascii=False), feedback.record_id),
-        )
-        conn.commit()
-    return {"ok": True, "message": "feedback recorded"}
+    missions = db.list_missions(status="human_pending", limit=limit)
+    calls = []
+    for m in missions:
+        call_list_data = json.loads(m["call_list_json"]) if m.get("call_list_json") else []
+        for item in call_list_data:
+            calls.append({
+                "mission_id": m["id"],
+                "candidate": item.get("candidate", {}),
+                "overall_score": item.get("overall_score"),
+                "script": item.get("script"),
+            })
+    return {"ok": True, "calls": calls[:limit]}
 
 
 # ---------------------------------------------------------------------------

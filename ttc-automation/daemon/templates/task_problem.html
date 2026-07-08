@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}异常处理 - TTC{% endblock %}
+{% block content %}
+
+<h2>异常处理任务 <span class="tag">{{ task.status }}</span></h2>
+
+<div class="card warn">
+  <div class="lbl">异常类型</div>
+  <p>{{ payload.problem_reason or '未知异常' }}</p>
+</div>
+
+<div class="card">
+  <div class="lbl">上下文</div>
+  <div class="code">{{ payload.context | tojson(indent=2) }}</div>
+</div>
+
+{% if jd_struct %}
+<div class="card info">
+  <div class="lbl">JD 上下文</div>
+  <p><strong>公司</strong>: {{ jd_struct.company or '-' }}</p>
+  <p><strong>岗位</strong>: {{ jd_struct.position or '-' }}</p>
+  <p><strong>技能</strong>: {{ (jd_struct.skills or []) | join(', ') }}</p>
+</div>
+{% endif %}
+
+<h3>解决方案</h3>
+<form method="post" action="/human/task/{{ task.id }}/submit">
+  <label>处理方式</label>
+  <select name="resolution" required>
+    <option value="fixed">已修复 / 已补充，恢复任务</option>
+    <option value="skip">跳过该问题，继续自动流程</option>
+    <option value="close">无法解决，关闭任务</option>
+  </select>
+
+  <label>补充信息 / 说明</label>
+  <textarea name="notes" placeholder="你做了什么、补充了什么、为什么这样处理"></textarea>
+
+  <button type="submit" class="btn">提交</button>
+</form>
+
+{% endblock %}

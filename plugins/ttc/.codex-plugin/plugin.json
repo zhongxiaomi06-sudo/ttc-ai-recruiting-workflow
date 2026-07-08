@@ -1,0 +1,34 @@
+{
+  "name": "ttc-ai-headhunter",
+  "version": "0.1.0",
+  "description": "TTC AI 猎头工作流插件：把 JD 摄入、人才搜索、评分排序、电话任务派发和反馈闭环暴露给 Codex/Claude。
+  "author": {
+    "name": "TTC",
+    "url": "https://github.com/zhongxiaomi06-sudo"
+  },
+  "homepage": "http://127.0.0.1:8766/dashboard",
+  "repository": "https://github.com/zhongxiaomi06-sudo/my-memory",
+  "license": "MIT",
+  "keywords": ["recruiting", "headhunter", "talent", "tts", "workflow"],
+  "skills": "./skills/",
+  "apps": "./.app.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "TTC AI 猎头",
+    "shortDescription": "AI 驱动的猎头工作流：JD → 人才库 → 评分 → 电话任务 → 反馈。",
+    "longDescription": "连接 TTC 本地 Daemon，自动完成 JD 解析、Source/公司人才库召回、候选人评分、电话任务生成与飞书通知，并把需要人类判断的环节以 HTML 任务页形式交付给猎头。",
+    "developerName": "TTC",
+    "category": "Productivity",
+    "capabilities": ["mcp"],
+    "websiteURL": "http://127.0.0.1:8766/dashboard",
+    "privacyPolicyURL": "",
+    "termsOfServiceURL": "",
+    "brandColor": "#6c5ce7",
+    "defaultPrompt": [
+      "帮我处理这个 JD，从 TTC 人才库召回候选人并生成电话任务清单"
+    ],
+    "composerIcon": "./assets/ttc-icon.svg",
+    "logo": "./assets/ttc-icon.png",
+    "screenshots": []
+  }
+}

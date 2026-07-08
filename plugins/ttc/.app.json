@@ -1,0 +1,10 @@
+{
+  "apps": {
+    "ttc-daemon": {
+      "id": "ttc_daemon_local",
+      "name": "TTC Local Daemon",
+      "type": "local_service",
+      "url": "http://127.0.0.1:8766"
+    }
+  }
+}

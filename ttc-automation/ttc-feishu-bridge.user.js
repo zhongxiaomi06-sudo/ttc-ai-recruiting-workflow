@@ -25,7 +25,7 @@
 
   function loadConfig() {
     const saved = GM_getValue(CONFIG_KEY, null);
-    const defaults = { daemonUrl: DEFAULT_DAEMON_URL, autoDetect: false };
+    const defaults = { daemonUrl: DEFAULT_DAEMON_URL, apiToken: '', autoDetect: false };
     return saved ? Object.assign(defaults, saved) : defaults;
   }
 
@@ -45,10 +45,12 @@
 
   function sendToDaemon(payload) {
     const url = config.daemonUrl.replace(/\/$/, '') + '/ingest/feishu';
+    const headers = { 'Content-Type': 'application/json' };
+    if (config.apiToken) headers['X-TTC-Token'] = config.apiToken;
     GM_xmlhttpRequest({
       method: 'POST',
       url: url,
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       data: JSON.stringify(payload),
       onload: (res) => {
         if (res.status >= 200 && res.status < 300) {
@@ -95,7 +97,8 @@
       source_type: 'feishu_web',
       source_url: location.href,
       title: document.title,
-      content: content,
+      raw_text: content,
+      markdown: content,
       selected: isSelection,
       user_agent: navigator.userAgent,
       captured_at: new Date().toISOString(),
@@ -173,6 +176,16 @@
       }
     });
     panel.appendChild(cfgBtn);
+
+    const tokenBtn = btn('设置 API Token', () => {
+      const newToken = prompt('TTC API Token（未启用可留空）', config.apiToken || '');
+      if (newToken !== null) {
+        config.apiToken = newToken;
+        saveConfig(config);
+        notify('TTC', 'API Token 已保存');
+      }
+    });
+    panel.appendChild(tokenBtn);
 
     const toggle = document.createElement('label');
     toggle.style.display = 'flex';

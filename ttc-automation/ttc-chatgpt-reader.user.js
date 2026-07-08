@@ -24,7 +24,7 @@
 
   function loadConfig() {
     const saved = GM_getValue(CONFIG_KEY, null);
-    const defaults = { daemonUrl: DEFAULT_DAEMON_URL, autoSend: true };
+    const defaults = { daemonUrl: DEFAULT_DAEMON_URL, apiToken: '', autoSend: true };
     return saved ? Object.assign(defaults, saved) : defaults;
   }
 
@@ -44,10 +44,12 @@
 
   function sendToDaemon(payload) {
     const url = config.daemonUrl.replace(/\/$/, '') + '/ingest/link';
+    const headers = { 'Content-Type': 'application/json' };
+    if (config.apiToken) headers['X-TTC-Token'] = config.apiToken;
     GM_xmlhttpRequest({
       method: 'POST',
       url: url,
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       data: JSON.stringify(payload),
       onload: (res) => {
         if (res.status >= 200 && res.status < 300) {
@@ -94,7 +96,7 @@
       source_type: 'chatgpt_share',
       source_url: location.href,
       title: document.title,
-      content: messages,
+      raw_text: markdown,
       markdown: markdown,
       captured_at: new Date().toISOString(),
       access_basis: 'public_share_page',
@@ -182,6 +184,14 @@
         config.daemonUrl = newUrl;
         saveConfig(config);
         notify('TTC', 'Daemon 地址已保存');
+      }
+    }));
+    panel.appendChild(btn('设置 API Token', () => {
+      const newToken = prompt('TTC API Token（未启用可留空）', config.apiToken || '');
+      if (newToken !== null) {
+        config.apiToken = newToken;
+        saveConfig(config);
+        notify('TTC', 'API Token 已保存');
       }
     }));
 

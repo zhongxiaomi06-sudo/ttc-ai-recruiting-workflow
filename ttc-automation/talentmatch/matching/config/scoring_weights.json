@@ -1,0 +1,10 @@
+{
+  "skill_match": 0.35,
+  "experience": 0.20,
+  "education": 0.10,
+  "stability": 0.12,
+  "company_tier": 0.08,
+  "salary_fit": 0.05,
+  "industry_alignment": 0.05,
+  "role_level_match": 0.05
+}

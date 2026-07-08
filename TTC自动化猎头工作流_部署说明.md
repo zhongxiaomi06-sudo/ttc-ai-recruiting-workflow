@@ -11,6 +11,37 @@
 
 ## 1. 推荐部署形态
 
+### 1.0 当前指定形态：部署到 TalentMatch 服务器
+
+当前正式部署目标不是单独建站，而是复用 TalentMatch 服务器，并在 TalentMatch 的视觉体系中新增方案四工作流前端：
+
+```text
+https://yorkteam.cn                 TalentMatch React 前端，同一套视觉与导航
+https://yorkteam.cn/api/*           TalentMatch 现有后端，端口 8878
+https://yorkteam.cn/api/ttc/*       TTC 方案四子系统，端口 8766
+```
+
+TTC 只作为 AI 工作流后端子系统部署在同一台服务器：
+
+```text
+TalentMatch 风格的 AI 工作流页面
+        ↓ /api/ttc/*
+TTC Daemon（127.0.0.1:8766）
+        ↓
+read_jobs / raw_ingest / artifact / Mission / human_task / feedback
+        ↓
+TalentMatch parser / matching / feedback / Feishu Bot（provider/adapter 复用）
+```
+
+原则：
+
+- 不直接复用 TalentMatch 现有页面来硬塞工作流。
+- 新增符合 TalentMatch 色彩、布局、交互习惯的 AI 工作流页面。
+- 不改 TalentMatch `/api/*` 现有接口。
+- 不让 TTC 另起公开 Dashboard 作为正式入口。
+- TTC 的 HTML 任务页短期可保留调试，正式使用由新的 workflow React 页面调用 `/api/ttc/*` 展示。
+- nginx 只新增 `/api/ttc/` 代理到 `127.0.0.1:8766`。
+
 推荐把核心服务部署到服务器，而不是全部跑在顾问电脑本地。
 
 ```text
@@ -25,21 +56,37 @@ Dashboard + HTML 任务页
 
 本地只保留“采集端”：浏览器油猴脚本、公司官方人才库浏览器插件、必要时的 candidate-collector。服务器负责统一存储、分类、路由、Mission 编排、任务页和后续 API 对接。
 
-## 2. 服务器部署（Docker Compose 推荐）
+## 2. TalentMatch 服务器部署
 
-### 2.1 准备服务器
+### 2.1 服务器现状
 
-- Linux 服务器，建议 2C4G 起步。
-- 安装 Docker 与 Docker Compose。
-- 准备域名，例如 `https://ttc.example.com`，并在 Nginx / Caddy / 云厂商网关上配置 HTTPS。
-- Dashboard 和任务页包含候选人信息，公网部署时必须放在 VPN、公司内网、Nginx Basic Auth 或其他访问控制之后。
+TalentMatch 当前生产形态：
+
+```text
+服务器：47.110.93.137
+域名：https://yorkteam.cn
+TalentMatch 后端：127.0.0.1:8878
+TalentMatch 前端：/opt/talentmatch/frontend/react-dist
+TTC 子系统目标端口：127.0.0.1:8766
+```
+
+部署时不要动现有 `recruit-bot` 服务和 `/api/*` 路由，只新增 `ttc-daemon` systemd 服务和 nginx `/api/ttc/` location。
 
 ### 2.2 上传代码并配置环境变量
 
 ```bash
-cd /opt
-git clone <your-repo-or-uploaded-folder> ttc-system
-cd /opt/ttc-system
+# 本地先 dry-run，确认只会同步到 /opt/ttc-automation
+DRY_RUN=1 ./deploy/sync_to_talentmatch.sh
+
+# 确认无误后正式同步
+DRY_RUN=0 ./deploy/sync_to_talentmatch.sh
+```
+
+首次部署后，在服务器上创建环境文件：
+
+```bash
+ssh root@47.110.93.137
+cd /opt/ttc-automation
 
 cp .env.server.example .env.server
 vim .env.server
@@ -48,58 +95,155 @@ vim .env.server
 关键配置：
 
 ```bash
-TTC_DAEMON_HOST=0.0.0.0
+TTC_DAEMON_HOST=127.0.0.1
 TTC_DAEMON_PORT=8766
-TTC_DATA_DIR=/data
+TTC_DATA_DIR=/opt/ttc-automation/data
 TTC_API_TOKEN=change-me-to-a-long-random-secret
+TTC_DASHBOARD_URL=https://yorkteam.cn/api/ttc
 
 # Source 公司人才库，先用 JSON 也可以
 TTC_SOURCE_TALENT_ENABLED=true
-TTC_SOURCE_TALENT_FILE=/data/source-candidates.json
+TTC_SOURCE_TALENT_FILE=/opt/ttc-automation/data/source-candidates.json
+
+# 可选：heuristic / talentmatch / goldscore / llm / auto
+TTC_SCORING_PROVIDER=heuristic
+TTC_TALENTMATCH_PATH=/opt/talentmatch
+TTC_GOLDSCORE_URL=
+TTC_GOLDSCORE_TOKEN=
+TTC_GOLDSCORE_LOCAL_ENABLED=false
 ```
 
-### 2.3 启动
+### 2.3 systemd 启动 TTC Daemon
 
 ```bash
-docker compose up -d --build
-docker compose logs -f ttc-daemon
+cd /opt/ttc-automation
+APP_DIR=/opt/ttc-automation ./deploy/server_bootstrap.sh
 ```
 
-服务默认映射到服务器 `8766` 端口。建议通过 Nginx 反代到域名：
+当前仓库的 service 模板已经指向 `/opt/ttc-automation`。TTC 只监听本机 `127.0.0.1:8766`，公网访问统一走 nginx `/api/ttc/`。
+服务器默认安装 [deploy/requirements-server.txt](deploy/requirements-server.txt) 的轻量运行时依赖；训练、Playwright、MarkItDown 等重依赖按需单独安装，避免阻塞 Daemon 上线。
+
+验证内部服务：
 
 ```bash
-sudo cp deploy/nginx-ttc-daemon.conf /etc/nginx/conf.d/ttc-daemon.conf
+curl http://127.0.0.1:8766/health
+```
+
+### 2.4 nginx 挂到 TalentMatch 域名
+
+把 [deploy/nginx-talentmatch-ttc.conf](deploy/nginx-talentmatch-ttc.conf) 中的 location 加进现有 `yorkteam.cn` HTTPS server block：
+
+```bash
+sudo cp /etc/nginx/conf.d/yorkteam.cn.conf /etc/nginx/conf.d/yorkteam.cn.conf.bak.$(date +%Y%m%d%H%M%S)
+# 手动把 deploy/nginx-talentmatch-ttc.conf 的 location 合并进 yorkteam.cn 的 server block
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-把 `deploy/nginx-ttc-daemon.conf` 里的 `server_name ttc.example.com` 改成你的真实域名，并加 HTTPS 证书。
+验证：
+
+```bash
+curl https://yorkteam.cn/api/ttc/health
+```
+
+### 2.5 TalentMatch 风格的 Workflow 前端
+
+前端不另起站点，也不是直接复用 TalentMatch 现有“人才库/职位库/智能匹配”页面。下一步是在 TalentMatch React 里新增一个适配方案四的工作流页面，沿用 TalentMatch 的：
+
+- 顶部与侧边导航结构
+- 蓝白色系、间距、卡片、表格、抽屉、表单风格
+- 登录态、权限、消息提醒、错误保护
+- API 封装方式和 Ant Design 组件体系
+
+页面内容服务于当前 workflow：
+
+```text
+菜单：AI 工作流 / TTC Mission
+数据源：/api/ttc/health
+       /api/ttc/dashboard 或结构化 API
+       /api/ttc/human/tasks
+       /api/ttc/api/call-list
+       /api/ttc/mission/{id}
+```
+
+短期可先做最小 workflow 页面：
+
+- Mission 列表
+- 待办 human_task 列表
+- 电话任务详情抽屉
+- 提交电话反馈
+- 读取 JD / URL 的表单
+- problem_task 结构化处理表单
+- Mission 时间线 / agent_runs 审计记录
+
+长期再把 TTC 的 Dashboard HTML 下线，全部改成 TalentMatch 风格的 React workflow 页面。
+
+本地已准备一个最小可用页面：
+
+```text
+ttc-automation/talentmatch/frontend/src/pages/TTCWorkflow.jsx
+ttc-automation/talentmatch/frontend/src/api/index.js
+ttc-automation/talentmatch/frontend/src/components/Layout.jsx
+ttc-automation/talentmatch/frontend/src/App.jsx
+```
+
+部署到 TalentMatch 前端时，先在服务器备份现有 `/opt/talentmatch/frontend/react-dist`，再把构建结果发布过去；不要覆盖 TalentMatch 原后端服务。
+
+当前服务器验证结果：
+
+```text
+ttc-daemon.service: active
+nginx: active
+recruit-bot: active
+http://127.0.0.1:8766/health: 200
+https://yorkteam.cn/api/ttc/health: 200
+https://yorkteam.cn/api/ttc/api/missions: 200
+https://yorkteam.cn: 200
+```
+
+### 2.7 Sentry 监控
+
+后端 TTC Daemon 使用 `sentry-sdk[fastapi]`，前端 TalentMatch React 使用 `@sentry/react`。默认不配置 DSN 时不会发送数据。
+
+服务器 `.env.server`：
+
+```bash
+TTC_SENTRY_DSN=
+TTC_SENTRY_ENVIRONMENT=production
+TTC_SENTRY_RELEASE=ttc-daemon@0.3.0
+TTC_SENTRY_TRACES_SAMPLE_RATE=0.1
+TTC_SENTRY_PROFILES_SAMPLE_RATE=0.0
+TTC_SENTRY_SEND_PII=false
+```
+
+TalentMatch React 构建环境：
+
+```bash
+VITE_SENTRY_DSN=
+VITE_SENTRY_ENVIRONMENT=production
+VITE_SENTRY_RELEASE=talentmatch-ttc-workflow@0.1.0
+VITE_SENTRY_TRACES_SAMPLE_RATE=0.1
+VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0
+VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1
+```
 
 验证：
 
 ```bash
-curl http://SERVER_IP:8766/health
-# 或
-curl https://ttc.example.com/health
+curl https://yorkteam.cn/api/ttc/api/monitoring/status
+
+# 配置 TTC_API_TOKEN 后可触发一条后端测试事件
+curl -X POST -H "X-TTC-Token: $TTC_API_TOKEN" \
+  https://yorkteam.cn/api/ttc/api/monitoring/sentry-test
 ```
 
-### 2.4 非 Docker 部署（可选）
+### 2.6 Docker 部署（不作为当前首选）
 
-如果不用 Docker，可以用 systemd：
+如果未来单独部署 TTC，可用 Docker Compose：
 
 ```bash
-cd /opt/ttc-system
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 -m playwright install chromium
-
-sudo useradd --system --home /opt/ttc-system --shell /usr/sbin/nologin ttc || true
-sudo chown -R ttc:ttc /opt/ttc-system
-sudo cp deploy/ttc-daemon.service /etc/systemd/system/ttc-daemon.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now ttc-daemon
-sudo systemctl status ttc-daemon
+docker compose up -d --build
+docker compose logs -f ttc-daemon
 ```
 
 ## 3. 本地开发模式（可选）
@@ -161,12 +305,14 @@ export TTC_TALENT_DB_KEY=your-api-key
 export TTC_TALENT_DB_QUERY_PATH=/api/candidates/search
 ```
 
-## 7. 配置 LLM（可选，用于 JD 结构化）
+## 7. 配置 LLM（可选，用于 JD 结构化和自动评分）
 
 ```bash
 export TTC_LLM_PROVIDER=openai
 export TTC_LLM_API_KEY=sk-...
 export TTC_LLM_MODEL=gpt-4o-mini
+# 默认 heuristic；设置为 llm 后，候选人评分优先走 LLM，失败自动回退
+export TTC_SCORING_PROVIDER=heuristic
 ```
 
 未配置时，Daemon 使用简单关键词兜底。
@@ -256,9 +402,34 @@ TTC_LLM_PROVIDER=openai
 TTC_LLM_API_KEY=sk-...
 TTC_LLM_BASE_URL=          # 可选，OpenAI 兼容接口时填写
 TTC_LLM_MODEL=gpt-4o-mini
+TTC_SCORING_PROVIDER=heuristic
 ```
 
-未配置时，系统自动使用关键词兜底，仍可运行。
+`TTC_SCORING_PROVIDER` 默认保持 `heuristic`，保证主流程稳定。可选值：
+
+- `talentmatch`：调用 TalentMatch `matching/unified_engine.py` 的 8 维度匹配引擎。
+- `goldscore`：优先调用 `TTC_GOLDSCORE_URL` 外部服务；当 `TTC_GOLDSCORE_LOCAL_ENABLED=true` 时尝试 `TTC_TALENTMATCH_PATH/matching/gold_score_engine.py`；都不可用时，用 TalentMatch 的公司梯队、学历、稳定性、行业对齐生成含金量分。
+- `llm`：调用 LLM 自动评分，输出推荐理由、风险和电话追问。
+- `auto`：优先 TalentMatch，失败后尝试 LLM，最后回退启发式。
+
+所有 provider 都只替换 scoring 层，不改变 Mission 状态机；外部调用失败时会回退到启发式评分。GoldScore 外部服务建议实现：
+
+```text
+POST $TTC_GOLDSCORE_URL
+Headers: Authorization: Bearer $TTC_GOLDSCORE_TOKEN   # 可选
+Body: {
+  "candidate": 标准化候选人,
+  "jd": 标准化 JD,
+  "raw_candidate": 原候选人字段,
+  "raw_jd": 原 JD 字段
+}
+Response: {
+  "overall_score": 0-100,
+  "risk_flags": [],
+  "evidence": [],
+  "verification_questions": []
+}
+```
 
 ## 7.6 飞书 Bot 通知（可选）
 
@@ -380,16 +551,25 @@ curl $TTC_URL/api/call-list | python3 -m json.tool
 
 - **ChatGPT share link 在当前环境无法访问**（网络层超时/拒绝）。已搭建自动化读取器（静态 fetch + Playwright 兜底），在可访问 ChatGPT 的网络中即可工作。
 - 公司人才库 API 需要用户提供文档后才能正式对接；Source 公司数据可先用本地 JSON 导出接入。
-- GoldScoreEngine / TalentMatch 评分逻辑当前为占位，后续接入现有模块。
+- GoldScoreEngine / TalentMatch 不作为新系统重写，只通过 scoring provider / parser adapter / feedback adapter 接入现有 Mission 主链路。当前 scoring provider 已支持 `talentmatch`、`goldscore`、`llm`、`auto`，其中 `talentmatch` 复用 `matching/unified_engine.py`，`goldscore` 可接外部服务或未来的 `matching/gold_score_engine.py`。
 - Orchestrator 当前为单节点、SQLite 内状态机；多顾问并发场景后续可迁移到任务队列（Redis/RabbitMQ）。
 - `TTC_API_TOKEN` 只保护机器写入/触发接口；Dashboard 和 HTML 任务页仍建议放在 Nginx Basic Auth、VPN 或公司内网后面。
 
 ## 11. 下一步
 
-1. 用户提供公司人才库 API 或 Source 公司人才库 JSON/API，完善 `ttc_daemon/talent_db_adapter.py` 的字段映射。
-2. 按成熟工具矩阵接入 Crawl4AI / Firecrawl / MarkItDown / Browser Use，实现全网补全和文件解析。
-3. 接入 GoldScoreEngine / TalentMatch 真实评分。
-4. 在可访问 ChatGPT 的机器上验证对话读取。
-5. 猎头打电话后通过 `/human/task/<id>/complete` 回填结果，形成学习闭环。
-6. 持续完善 problem task 的结构化字段和 resume_action，保证异常解决后能恢复原流程。
-7. 接入飞书 Bot 通知：新任务生成时自动推送给猎头。
+当前不改变基层架构。主链路固定为：
+
+```text
+read_jobs → raw_ingest → artifact_classifier → normalized_artifacts
+→ mission_router → Mission Orchestrator → human/problem task → feedback
+```
+
+接下来按以下顺序推进：
+
+1. **对齐基线**：保护本地未提交改动，先同步远端最新 `origin/main`，以最新方案四实现作为真实基线。
+2. **验证主闭环**：跑 compile/test/smoke，确认 JD 能走到 `human_pending`，电话任务全部完成后能进入 `feedback/closed`。
+3. **修 P0 闭环**：优先修 `phone_call` 完成推进、`problem_pending` 的 `resume_state/resume_action`、read_job 重试恢复。
+4. **接入成熟评分**：scoring provider 已接入 TalentMatch UnifiedMatchEngine、GoldScoreEngine 外部服务/本地模块入口和 LLM 自动评分；独立 GoldScoreEngine 未配置时自动使用含金量估算。
+5. **接入反馈学习**：把电话反馈、顾问校准、客户反馈写成 TalentMatch `feedback_learner` 可消费的数据。
+6. **迁入主仓**：稳定后把 `ttc-automation/` 作为顶层目录迁入 `talentmatch-recruit`，不要先拆进 TalentMatch 内部。
+7. **再扩工具**：主闭环稳定后，再接 Crawl4AI / Firecrawl / MarkItDown / Browser Use、飞书 Bot 卡片和 React 管理后台。

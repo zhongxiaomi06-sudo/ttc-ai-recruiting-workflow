@@ -1,0 +1,25 @@
+{
+  "_comment": "技能组合高/低价值标记 — York 编辑",
+  "high_value_combos": [
+    ["Go", "高并发", "微服务"],
+    ["Rust", "系统底层", "性能优化"],
+    ["LLM", "RAG", "Agent"],
+    ["Spark", "Flink", "实时计算"],
+    ["K8s", "云原生", "Docker"],
+    ["推荐系统", "广告", "NLP"]
+  ],
+  "low_value_combos": [
+    ["Vue", "管理后台"],
+    ["jQuery", "HTML"],
+    ["Excel", "SQL"]
+  ],
+  "skill_bonus": {
+    "Rust": 1.1,
+    "LLM": 1.08,
+    "大模型": 1.08,
+    "RAG": 1.05,
+    "高并发": 1.05,
+    "分布式": 1.03,
+    "推荐系统": 1.05
+  }
+}

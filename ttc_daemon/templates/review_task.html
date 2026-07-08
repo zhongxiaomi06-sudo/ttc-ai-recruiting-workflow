@@ -5,7 +5,7 @@
   <span class="tag">任务类型：{% if task.task_type == 'review' %}顾问审核{% else %}合规仲裁{% endif %}</span>
   <span class="tag">任务 ID：{{ task.id }}</span>
   <h2 style="margin-top:12px;">{{ payload.title | default('需要您的人工判断') }}</h2>
-  <p class="muted">Mission：{{ task.mission_id }}</p>
+  <p class="muted">任务：{{ task.mission_id }}</p>
 </div>
 
 <div class="card">

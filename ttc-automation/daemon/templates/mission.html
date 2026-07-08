@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}任务 {{ mission.id[:18] }} - TTC{% endblock %}
+{% block content %}
+
+<h2>任务：{{ mission.id[:18] }} <span class="tag">{{ mission.status }}</span></h2>
+
+<div class="grid-2">
+  <div class="card info">
+    <div class="lbl">JD 结构化</div>
+    {% if jd_struct %}
+    <ul>
+      <li><strong>公司</strong>: {{ jd_struct.company or '-' }}</li>
+      <li><strong>岗位</strong>: {{ jd_struct.position or '-' }}</li>
+      <li><strong>地点</strong>: {{ jd_struct.location or '-' }}</li>
+      <li><strong>薪资</strong>: {{ jd_struct.salary or '-' }}</li>
+      <li><strong>年限</strong>: {{ jd_struct.years or '-' }}</li>
+      <li><strong>学历</strong>: {{ jd_struct.education or '-' }}</li>
+      <li><strong>技能</strong>: {{ (jd_struct.skills or []) | join(', ') }}</li>
+    </ul>
+    {% else %}
+    <p>暂无 JD 结构化数据。</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="lbl">原始输入</div>
+    <p><strong>来源</strong>: {{ artifact.artifact_type if artifact else '-' }} / {{ artifact.confidence if artifact else '-' }}</p>
+    <p><strong>标题</strong>: {{ artifact.title or '-' }}</p>
+    <p><strong>URL</strong>: <a href="{{ artifact.source_url }}" target="_blank">{{ artifact.source_url or '-' }}</a></p>
+  </div>
+</div>
+
+{% if scores %}
+<h2>评分排序</h2>
+<table>
+  <thead>
+    <tr><th>候选人</th><th>综合分</th><th>JD 匹配</th><th>含金量</th><th>风险</th><th>风险信号</th></tr>
+  </thead>
+  <tbody>
+  {% for s in scores %}
+    <tr>
+      <td>{{ s.candidate.name or s.candidate.candidate_name or '未知' }}</td>
+      <td><span class="score">{{ s.overall_score }}</span></td>
+      <td>{{ s.jd_alignment }}</td>
+      <td>{{ s.gold_score }}</td>
+      <td>{% if s.risk > 0 %}<span class="risk">{{ s.risk }}</span>{% else %}{{ s.risk }}{% endif %}</td>
+      <td>{{ (s.risk_flags or []) | join(', ') or '-' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if call_list %}
+<h2>电话清单</h2>
+{% for item in call_list %}
+<div class="card ok">
+  <div class="lbl">{{ item.candidate.name or item.candidate.candidate_name or '候选人' }} · 综合分 {{ item.overall_score }}</div>
+  <p><strong>话术</strong>: {{ item.script }}</p>
+  <p><strong>证据</strong>: {{ item.evidence or '-' }}</p>
+  <p><strong>验证问题</strong>: </p>
+  <ul>
+    {% for q in item.verification_questions %}
+    <li>{{ q }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if tasks %}
+<h2>人工任务</h2>
+<table>
+  <thead>
+    <tr><th>ID</th><th>类型</th><th>状态</th><th>操作</th></tr>
+  </thead>
+  <tbody>
+  {% for t in tasks %}
+    <tr>
+      <td>{{ t.id[:18] }}</td>
+      <td>{{ t.task_type }}</td>
+      <td><span class="tag">{{ t.status }}</span></td>
+      <td><a class="btn" href="/human/task/{{ t.id }}">处理</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if runs %}
+<h2>Agent 运行记录</h2>
+<table>
+  <thead>
+    <tr><th>Agent</th><th>状态</th><th>时间</th><th>错误</th></tr>
+  </thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td>{{ r.agent_name }}</td>
+      <td>{{ r.status }}</td>
+      <td>{{ r.created_at }}</td>
+      <td>{{ r.error or '-' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

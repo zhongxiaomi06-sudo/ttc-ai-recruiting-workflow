@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/ttc-system
-EnvironmentFile=/opt/ttc-system/.env.server
-ExecStart=/opt/ttc-system/venv/bin/python ttc_daemon.py
+WorkingDirectory=/opt/ttc-automation
+EnvironmentFile=/opt/ttc-automation/.env.server
+ExecStart=/opt/ttc-automation/venv/bin/python ttc_daemon.py
 Restart=always
 RestartSec=5
 User=ttc

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}电话任务 - TTC{% endblock %}
+{% block content %}
+
+<h2>电话任务 <span class="tag">{{ task.status }}</span></h2>
+
+<div class="grid-2">
+  <div class="card info">
+    <div class="lbl">候选人档案</div>
+    <p><strong>姓名</strong>: {{ payload.candidate.name or payload.candidate.candidate_name or '未知' }}</p>
+    <p><strong>综合分</strong>: <span class="score">{{ payload.overall_score }}</span></p>
+    <p><strong>JD 匹配</strong>: {{ payload.jd_alignment }} <strong>含金量</strong>: {{ payload.gold_score }}</p>
+    {% if payload.risk_flags %}
+    <p class="risk"><strong>风险信号</strong>: {{ payload.risk_flags | join(', ') }}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="lbl">目标岗位</div>
+    <p><strong>公司</strong>: {{ jd_struct.company or '-' }}</p>
+    <p><strong>岗位</strong>: {{ jd_struct.position or '-' }}</p>
+    <p><strong>地点</strong>: {{ jd_struct.location or '-' }}</p>
+    <p><strong>技能</strong>: {{ (jd_struct.skills or []) | join(', ') }}</p>
+  </div>
+</div>
+
+<div class="card idea">
+  <div class="lbl">推荐话术</div>
+  <p>{{ payload.script }}</p>
+</div>
+
+<div class="card">
+  <div class="lbl">验证问题</div>
+  <ol>
+  {% for q in payload.verification_questions %}
+    <li>{{ q }}</li>
+  {% endfor %}
+  </ol>
+</div>
+
+<div class="card">
+  <div class="lbl">证据来源</div>
+  <p>{{ payload.evidence or '无' }}</p>
+</div>
+
+<h3>回填反馈</h3>
+<form method="post" action="/human/task/{{ task.id }}/submit">
+  <label>联系结果</label>
+  <select name="outcome" required>
+    <option value="interested">已联系 - 有兴趣</option>
+    <option value="not_interested">已联系 - 无兴趣</option>
+    <option value="no_answer">未接通</option>
+    <option value="wrong_info">信息有误</option>
+  </select>
+
+  <label>备注</label>
+  <textarea name="notes" placeholder="候选人反馈、薪资期望、可到岗时间等"></textarea>
+
+  <button type="submit" class="btn">提交反馈</button>
+</form>
+
+{% endblock %}

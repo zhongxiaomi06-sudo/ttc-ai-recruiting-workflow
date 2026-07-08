@@ -1,0 +1,13 @@
+{
+  "_comment": "稳定性评分规则 — 跳槽频率惩罚",
+  "rules": [
+    {"condition": "3年5跳以上", "penalty": -0.20, "label": "频繁跳槽"},
+    {"condition": "2年3跳", "penalty": -0.15, "label": "跳槽偏多"},
+    {"condition": "5年2跳以内", "bonus": 0.05, "label": "稳定"},
+    {"condition": "8年3跳以内", "bonus": 0.08, "label": "非常稳定"}
+  ],
+  "avg_tenure_bonus": {
+    "min_years": 2,
+    "bonus_per_job": 0.02
+  }
+}
