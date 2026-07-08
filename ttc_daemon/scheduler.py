@@ -8,7 +8,7 @@
 """
 import logging
 from collections import Counter
-from typing import Any, Dict
+from typing import Dict
 
 from . import db
 from .ingestion import read_job_runner, artifact_classifier, normalizer, mission_router
@@ -16,18 +16,6 @@ from .problem_task_manager import from_read_job, from_artifact
 from .agents import orchestrator, position_allocator
 
 logger = logging.getLogger(__name__)
-
-
-def _json_field(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        import json
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def _process_ingestion() -> None:

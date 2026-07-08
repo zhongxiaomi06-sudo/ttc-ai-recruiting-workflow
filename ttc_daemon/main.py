@@ -324,7 +324,7 @@ def dashboard():
         ).fetchall()
     missions += [dict(r) for r in closed]
     pending_tasks = db.list_pending_human_tasks(limit=100)
-    html = human_dispatch.render_dashboard(missions, pending_tasks)
+    html = human_dispatch.render_dashboard(missions, pending_tasks, api_token=API_TOKEN)
     return HTMLResponse(html)
 
 

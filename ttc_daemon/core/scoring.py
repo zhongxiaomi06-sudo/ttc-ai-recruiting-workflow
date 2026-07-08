@@ -323,7 +323,7 @@ def score_candidate_with_llm(
     results = []
     for i in range(runs):
         try:
-            raw = call_llm_json(system_prompt, user_prompt, temperature=0.3 + i * 0.1)
+            raw = call_llm_json(system_prompt, user_prompt, temperature=0.0)
             parsed = _parse_score_result(raw)
             results.append(parsed)
             logger.info(

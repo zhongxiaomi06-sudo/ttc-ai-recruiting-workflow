@@ -1,23 +1,11 @@
 """Read Job Runner：执行读取任务，把来源变成 raw_ingest_records。"""
 import logging
-import json
 from typing import Dict, Any
 
 from .. import db
 from ..link_reader import read_url, read_file
 
 logger = logging.getLogger(__name__)
-
-
-def _json_field(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def run_read_job(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,8 +18,8 @@ def run_read_job(job: Dict[str, Any]) -> Dict[str, Any]:
     source_url = job.get("source_url", "")
     provided_raw = job.get("raw_text", "")
     title = job.get("title", "")
-    job_capture_meta = _json_field(job.get("capture_meta"), {}) or {}
-    job_payload = _json_field(job.get("payload"), {}) or {}
+    job_capture_meta = db.parse_json_field(job.get("capture_meta"), {}) or {}
+    job_payload = db.parse_json_field(job.get("payload"), {}) or {}
     file_path = job_payload.get("file_path", "")
 
     try:
@@ -64,7 +52,7 @@ def run_read_job(job: Dict[str, Any]) -> Dict[str, Any]:
         elif source_url:
             record = read_url(source_url)
             record["source_type"] = source_type
-            record_capture_meta = _json_field(record.get("capture_meta"), {}) or {}
+            record_capture_meta = db.parse_json_field(record.get("capture_meta"), {}) or {}
             record["capture_meta"] = {**record_capture_meta, **job_capture_meta}
         else:
             raise ValueError("read_job 缺少 source_url 和 raw_text，无法读取")

@@ -18,20 +18,6 @@ _jinja_env: Environment = Environment(
 )
 
 
-def _load_json(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
-# ── 创建任务 ────────────────────────────────────────────────────────────────
-
-
 def create_call_tasks(mission: Dict[str, Any], call_items: List[Dict[str, Any]]) -> List[str]:
     """为每个电话任务创建 human_task 记录。"""
     task_ids = []
@@ -81,7 +67,7 @@ def get_task_html(tid: str) -> str:
     if not task:
         return _jinja_env.get_template("404.html").render(message="任务不存在")
 
-    payload = _load_json(task.get("payload"), {})
+    payload = db.parse_json_field(task.get("payload"), {})
     template_name = _template_for_task(task, payload)
 
     # 补充候选人和 JD 信息用于渲染
@@ -90,13 +76,13 @@ def get_task_html(tid: str) -> str:
         row = db.get_conn().execute("SELECT * FROM candidates WHERE id = ?", (candidate_id,)).fetchone()
         if row:
             cand = dict(row)
-            cand["source_types"] = _load_json(cand.get("source_types"), [])
-            cand["raw_profile"] = _load_json(cand.get("raw_profile"), {})
-            cand["enriched_profile"] = _load_json(cand.get("enriched_profile"), {})
-            cand["risk_flags"] = _load_json(cand.get("risk_flags"), [])
-            cand["dimension_scores"] = _load_json(cand.get("dimension_scores"), {})
-            cand["evidence_binding"] = _load_json(cand.get("evidence_binding"), [])
-            cand["verification_questions"] = _load_json(cand.get("verification_questions"), [])
+            cand["source_types"] = db.parse_json_field(cand.get("source_types"), [])
+            cand["raw_profile"] = db.parse_json_field(cand.get("raw_profile"), {})
+            cand["enriched_profile"] = db.parse_json_field(cand.get("enriched_profile"), {})
+            cand["risk_flags"] = db.parse_json_field(cand.get("risk_flags"), [])
+            cand["dimension_scores"] = db.parse_json_field(cand.get("dimension_scores"), {})
+            cand["evidence_binding"] = db.parse_json_field(cand.get("evidence_binding"), [])
+            cand["verification_questions"] = db.parse_json_field(cand.get("verification_questions"), [])
             payload["candidate"] = cand
 
     jd_record_id = payload.get("jd_record_id") or payload.get("jd_record", {}).get("id")
@@ -108,7 +94,7 @@ def get_task_html(tid: str) -> str:
     if task.get("mission_id"):
         mission = db.get_mission(task["mission_id"])
         if mission:
-            payload["jd_fields"] = _load_json(mission.get("jd_fields"), {})
+            payload["jd_fields"] = db.parse_json_field(mission.get("jd_fields"), {})
 
     db.update_human_task_status(tid, "opened")
     return _jinja_env.get_template(template_name).render(task=task, payload=payload)
@@ -136,13 +122,13 @@ def _template_for_task(task: Dict[str, Any], payload: Dict[str, Any]) -> str:
     return template_map.get(task_type, "generic_task.html")
 
 
-def render_dashboard(missions: List[Dict[str, Any]], pending_tasks: List[Dict[str, Any]]) -> str:
+def render_dashboard(missions: List[Dict[str, Any]], pending_tasks: List[Dict[str, Any]], api_token: str = "") -> str:
     """渲染 Mission 仪表盘。"""
     from collections import Counter
 
     for m in missions:
-        m["candidate_count"] = len(_load_json(m.get("candidate_ids"), []))
-        m["call_task_count"] = len(_load_json(m.get("call_list_ids"), []))
+        m["candidate_count"] = len(db.parse_json_field(m.get("candidate_ids"), []))
+        m["call_task_count"] = len(db.parse_json_field(m.get("call_list_ids"), []))
         m.setdefault("allocation_state", "DISCOVERED")
         m.setdefault("priority_score", 0.0)
 
@@ -155,6 +141,7 @@ def render_dashboard(missions: List[Dict[str, Any]], pending_tasks: List[Dict[st
         missions=missions,
         pending_tasks=pending_tasks,
         allocation_summary=allocation_summary,
+        api_token=api_token,
     )
 
 
@@ -169,7 +156,7 @@ def complete_task(tid: str, result: Dict[str, Any]) -> None:
 
     db.complete_human_task(tid, result)
 
-    payload = _load_json(task.get("payload"), {})
+    payload = db.parse_json_field(task.get("payload"), {})
 
     if task["task_type"] == "call":
         _complete_call_task(task, payload, result)
@@ -265,7 +252,7 @@ def _complete_problem_task(
 
 
 def _resume_read_job(payload: Dict[str, Any], result: Dict[str, Any], retry: bool, use_manual_text: bool = False) -> None:
-    jid = payload.get("read_job_id") or _load_json(payload.get("read_job"), {}).get("id")
+    jid = payload.get("read_job_id") or db.parse_json_field(payload.get("read_job"), {}).get("id")
     if not jid:
         return
     updates: Dict[str, Any] = {
@@ -286,7 +273,7 @@ def _resume_read_job(payload: Dict[str, Any], result: Dict[str, Any], retry: boo
 
 
 def _resume_manual_classify(payload: Dict[str, Any], result: Dict[str, Any]) -> None:
-    aid = payload.get("artifact_id") or _load_json(payload.get("artifact"), {}).get("id")
+    aid = payload.get("artifact_id") or db.parse_json_field(payload.get("artifact"), {}).get("id")
     artifact_type = result.get("artifact_type", "").strip()
     if not aid or artifact_type not in {"jd", "candidate", "evidence", "chat", "unknown"}:
         return
@@ -319,7 +306,7 @@ def _resume_jd_clarify(mission_id: Optional[str], payload: Dict[str, Any], resul
     mission = db.get_mission(mission_id)
     if not mission:
         return
-    current = _load_json(mission.get("jd_fields"), {}) or payload.get("jd_fields") or {}
+    current = db.parse_json_field(mission.get("jd_fields"), {}) or payload.get("jd_fields") or {}
     additions = {
         "position": result.get("position", "").strip(),
         "location": result.get("location", "").strip(),
@@ -359,7 +346,7 @@ def _resume_mission_if_tasks_done(mission_id: str) -> None:
         # 审核完成 → 检查是否有被驳回的
         review_tasks = [t for t in tasks if t.get("task_type") == "review"]
         any_rejected = any(
-            _load_json(t.get("result"), {}).get("outcome") == "rejected"
+            db.parse_json_field(t.get("result"), {}).get("outcome") == "rejected"
             for t in review_tasks
         )
         if any_rejected:

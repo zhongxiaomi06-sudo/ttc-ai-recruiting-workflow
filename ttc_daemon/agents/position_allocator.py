@@ -14,12 +14,29 @@
 - 长期无响应 → 降级或 STOP
 - 客户反馈快 → 加分
 """
+import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import db
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_candidate_ids(mission: Dict[str, Any]) -> list:
+    """Safely parse candidate_ids from a mission record (JSON string or list)."""
+    raw = mission.get("candidate_ids")
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
 
 # 仓位状态定义
 ALLOCATION_STATES = {
@@ -157,7 +174,7 @@ def evaluate_allocation(mission: Dict[str, Any]) -> Tuple[str, str]:
 
     if not call_tasks:
         # 无反馈数据 → 保持或初始分配
-        candidates_count = len(eval(mission.get("candidate_ids", "[]") or "[]"))
+        candidates_count = len(_parse_candidate_ids(mission))
         if current == "DISCOVERED":
             if candidates_count >= 3:
                 return ("TRIAL", "有 ≥3 位候选人，自动进入小仓试水")
@@ -168,7 +185,6 @@ def evaluate_allocation(mission: Dict[str, Any]) -> Tuple[str, str]:
     total_signal = 0
     outcomes = {}
     for t in call_tasks:
-        import json
         result = t.get("result", "") or "{}"
         if isinstance(result, str):
             try:
@@ -256,11 +272,7 @@ def init_mission_allocation(mission: Dict[str, Any]) -> str:
     Returns:
         allocation_state
     """
-    candidates_count = len(
-        [c for c in (mission.get("candidate_ids") or "").strip("[]").split(",") if c.strip()]
-        if isinstance(mission.get("candidate_ids"), str)
-        else (mission.get("candidate_ids") or [])
-    )
+    candidates_count = len(_parse_candidate_ids(mission))
 
     if candidates_count >= 3:
         state = "TRIAL"

@@ -9,6 +9,23 @@ from .config import DATA_DIR
 DB_PATH = DATA_DIR / "ttc_daemon.db"
 
 
+def parse_json_field(value: Any, default: Any = None) -> Any:
+    """Safely parse a JSON field from a DB record (may be str, dict, or list).
+
+    Use in all modules instead of redefining _load_json / _json_field locally.
+    """
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return default
+
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -239,7 +256,7 @@ def insert_ingest(record: Dict[str, Any]) -> str:
                 record.get("error", ""),
                 json.dumps(record.get("capture_meta", {}), ensure_ascii=False),
                 json.dumps(record, ensure_ascii=False),
-                record.get("collected_at") or datetime.datetime.utcnow().isoformat() + "Z",
+                record.get("collected_at") or datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
             ),
         )
     return rid

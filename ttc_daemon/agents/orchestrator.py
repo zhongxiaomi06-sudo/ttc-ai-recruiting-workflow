@@ -14,7 +14,6 @@
 - AI 默认自动推进；遇到异常或信息缺失时，才暂停并生成 HTML 任务页调度人。
 - Mission 由 mission_router 从 normalized_artifact 创建，通常已带有 jd_fields。
 """
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -22,17 +21,6 @@ from .. import db
 from . import jd_agent, sourcing_agent, scoring_agent, outreach_agent, human_dispatch, feedback_agent, position_allocator
 
 logger = logging.getLogger(__name__)
-
-
-def _json_field(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def _get_jd_record(mission: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -48,19 +36,19 @@ def _get_jd_record(mission: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _load_candidates(mission: Dict[str, Any]) -> List[Dict[str, Any]]:
-    candidate_ids = _json_field(mission.get("candidate_ids"), [])
+    candidate_ids = db.parse_json_field(mission.get("candidate_ids"), [])
     candidates = []
     for cid in candidate_ids:
         row = db.get_conn().execute("SELECT * FROM candidates WHERE id = ?", (cid,)).fetchone()
         if row:
             cand = dict(row)
-            cand["source_types"] = _json_field(cand.get("source_types"), [])
-            cand["raw_profile"] = _json_field(cand.get("raw_profile"), {})
-            cand["enriched_profile"] = _json_field(cand.get("enriched_profile"), {})
-            cand["risk_flags"] = _json_field(cand.get("risk_flags"), [])
-            cand["dimension_scores"] = _json_field(cand.get("dimension_scores"), {})
-            cand["evidence_binding"] = _json_field(cand.get("evidence_binding"), [])
-            cand["verification_questions"] = _json_field(cand.get("verification_questions"), [])
+            cand["source_types"] = db.parse_json_field(cand.get("source_types"), [])
+            cand["raw_profile"] = db.parse_json_field(cand.get("raw_profile"), {})
+            cand["enriched_profile"] = db.parse_json_field(cand.get("enriched_profile"), {})
+            cand["risk_flags"] = db.parse_json_field(cand.get("risk_flags"), [])
+            cand["dimension_scores"] = db.parse_json_field(cand.get("dimension_scores"), {})
+            cand["evidence_binding"] = db.parse_json_field(cand.get("evidence_binding"), [])
+            cand["verification_questions"] = db.parse_json_field(cand.get("verification_questions"), [])
             candidates.append(cand)
     return candidates
 
@@ -189,11 +177,11 @@ def step_mission(mission: Dict[str, Any]) -> None:
 def _step_created(mission: Dict[str, Any]) -> None:
     """created → jd_parsed 或 problem_pending"""
     mid = mission["id"]
-    jd_fields = _json_field(mission.get("jd_fields"), {})
+    jd_fields = db.parse_json_field(mission.get("jd_fields"), {})
     if not jd_fields:
         artifact = db.get_normalized_artifact(mission.get("normalized_artifact_id") or "")
         if artifact:
-            jd_fields = _json_field(artifact.get("normalized_payload"), {})
+            jd_fields = db.parse_json_field(artifact.get("normalized_payload"), {})
     if not jd_fields:
         jd_record = _get_jd_record(mission)
         if not jd_record:
@@ -229,7 +217,7 @@ def _step_created(mission: Dict[str, Any]) -> None:
 
 def _step_jd_parsed(mission: Dict[str, Any]) -> None:
     """jd_parsed → sourcing 或 problem_pending"""
-    jd_fields = _json_field(mission.get("jd_fields"), {})
+    jd_fields = db.parse_json_field(mission.get("jd_fields"), {})
     try:
         candidates = sourcing_agent.search(mission, jd_fields)
     except Exception as e:
@@ -259,7 +247,7 @@ def _step_jd_parsed(mission: Dict[str, Any]) -> None:
 def _step_sourcing(mission: Dict[str, Any]) -> None:
     """sourcing → scored 或 problem_pending"""
     candidates = _load_candidates(mission)
-    jd_fields = _json_field(mission.get("jd_fields"), {})
+    jd_fields = db.parse_json_field(mission.get("jd_fields"), {})
     try:
         score_result = scoring_agent.score(mission, candidates, jd_fields)
     except Exception as e:
@@ -314,10 +302,10 @@ def _step_scored(mission: Dict[str, Any]) -> None:
     """
     mid = mission["id"]
     candidates = _load_candidates(mission)
-    jd_fields = _json_field(mission.get("jd_fields"), {})
+    jd_fields = db.parse_json_field(mission.get("jd_fields"), {})
 
     # 检查是否有合规任务待处理
-    config = _json_field(mission.get("config"), {})
+    config = db.parse_json_field(mission.get("config"), {})
     compliance_task_ids = config.get("compliance_task_ids", [])
     if compliance_task_ids:
         pending_compliance = []
@@ -417,7 +405,7 @@ def _step_human_review(mission: Dict[str, Any]) -> None:
     all_approved = True
     any_rejected = False
     for t in completed_reviews:
-        result = _json_field(t.get("result"), {})
+        result = db.parse_json_field(t.get("result"), {})
         outcome = result.get("outcome", "")
         if outcome == "rejected":
             any_rejected = True
@@ -450,7 +438,7 @@ def _step_calling(mission: Dict[str, Any]) -> None:
     """calling → human_pending（生成电话任务 + human_tasks）"""
     mid = mission["id"]
     candidates = _load_candidates(mission)
-    jd_fields = _json_field(mission.get("jd_fields"), {})
+    jd_fields = db.parse_json_field(mission.get("jd_fields"), {})
 
     try:
         call_items = outreach_agent.generate_call_tasks(mission, candidates, jd_fields)
@@ -496,7 +484,7 @@ def _step_human_pending(mission: Dict[str, Any]) -> None:
         db.update_mission_state(mid, "closed", {"outcome": "stalled", "closed_at": db.now_iso()})
         return
     if all(t["status"] == "completed" for t in tasks):
-        resume_state = _json_field(mission.get("config"), {}).get("resume_state")
+        resume_state = db.parse_json_field(mission.get("config"), {}).get("resume_state")
         if not resume_state:
             resume_state = mission.get("resume_state") or "feedback"
         db.update_mission_state(mid, resume_state, {"resume_state": None})

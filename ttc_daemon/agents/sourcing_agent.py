@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 
 from .. import db
 from ..candidate_collector_client import fetch_export_jd
-from ..pipeline import enrich_candidate
+from ..core.enrichment import enrich_candidate
 from ..talent_db_adapter import query_talent_db, query_source_company_db
 
 logger = logging.getLogger(__name__)

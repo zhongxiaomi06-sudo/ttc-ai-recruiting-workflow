@@ -58,6 +58,7 @@
     td { padding:10px; border-bottom:1px solid var(--border); }
     a { color:var(--blue); text-decoration:none; }
     a:hover { text-decoration:underline; }
+    {% block styles %}{% endblock %}
   </style>
 </head>
 <body>
@@ -68,5 +69,6 @@
   <div class="container">
     {% block content %}{% endblock %}
   </div>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

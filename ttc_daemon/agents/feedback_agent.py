@@ -5,7 +5,6 @@
 2. 复盘报告生成：每周自动生成 Mission 复盘（命中率、响应率、推荐精度）
 3. Mission 进入 feedback 状态后自动调用
 """
-import json
 import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -23,17 +22,6 @@ DEFAULT_WEIGHTS = {
     "engineering_integrity": 0.10,
     "company_prestige": 0.10,
 }
-
-
-def _load_json(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def analyze_mission_feedback(mission_id: str) -> Dict[str, Any]:
@@ -55,13 +43,13 @@ def analyze_mission_feedback(mission_id: str) -> Dict[str, Any]:
 
     feedback_entries = []
     for t in completed_calls:
-        result = _load_json(t.get("result"), {})
+        result = db.parse_json_field(t.get("result"), {})
         if result:
             feedback_entries.append({
                 "task_id": t.get("id"),
                 "outcome": result.get("outcome", "unknown"),
                 "notes": result.get("notes", ""),
-                "payload": _load_json(t.get("payload"), {}),
+                "payload": db.parse_json_field(t.get("payload"), {}),
             })
 
     # 统计各 outcome
@@ -274,7 +262,7 @@ def get_calibrated_weights() -> Dict[str, float]:
         tasks = db.get_mission_human_tasks(mid)
         for t in tasks:
             if t.get("task_type") == "call" and t.get("status") == "completed":
-                result = _load_json(t.get("result"), {})
+                result = db.parse_json_field(t.get("result"), {})
                 if result.get("outcome") in ("not_interested", "wrong_info"):
                     all_rejection_notes.append({
                         "notes": result.get("notes", ""),

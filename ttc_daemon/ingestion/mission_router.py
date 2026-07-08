@@ -1,5 +1,4 @@
 """Mission Router：根据 normalized artifact 决定下一步动作。"""
-import json
 import logging
 from typing import Dict, Any
 
@@ -10,23 +9,12 @@ logger = logging.getLogger(__name__)
 JD_CONFIDENCE_THRESHOLD = 0.6
 
 
-def _load_json(value: Any, default: Any = None) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
-
-
 def route(artifact: Dict[str, Any]) -> Dict[str, Any]:
     """对 normalized artifact 进行路由。"""
     aid = artifact["id"]
     artifact_type = artifact.get("artifact_type", "unknown")
     confidence = artifact.get("confidence", 0.0)
-    payload = _load_json(artifact.get("normalized_payload"), {})
+    payload = db.parse_json_field(artifact.get("normalized_payload"), {})
 
     if artifact_type == "jd" and confidence >= JD_CONFIDENCE_THRESHOLD:
         mid = db.insert_mission(normalized_artifact_id=aid)

@@ -59,7 +59,7 @@ def score(
         "top_scores": top_scores,
         "level_distribution": level_distribution,
         "compliance_count": len(compliance_candidates),
-        "scoring_method": "llm_cot" if not scored or not scored[0].get("_fallback") else "fallback",
+        "scoring_method": "fallback" if (not scored or scored[0].get("_fallback")) else "llm_cot",
     }
 
     logger.info(

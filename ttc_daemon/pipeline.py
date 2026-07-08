@@ -1,19 +1,25 @@
+"""Pipeline：兼容旧版 /pipeline/run 端点，委托给 ingestion + orchestrator。
+
+不再重复 JD 解析、人才召回、评分逻辑 —— 统一通过 read_job → classify →
+normalize → route → mission → orchestrator 进行。
+"""
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from . import db
-from .candidate_collector_client import fetch_export_jd
-from .core.enrichment import enrich_candidate
-from .core.jd_parser import extract_jd
-from .core.scoring import score_candidate, generate_talking_points
-from .talent_db_adapter import query_talent_db
+from .ingestion import artifact_classifier, normalizer, mission_router
+from .agents import orchestrator
 
 logger = logging.getLogger(__name__)
 
 
 def run_pipeline(jd_record_id: Optional[str] = None) -> Dict[str, Any]:
-    """主链路：JD → 人才库 + candidate-collector → 补全 → 评分 → 电话清单。"""
+    """主链路：通过 ingestion pipeline + orchestrator 状态机推进 Mission。
+
+    兼容旧版 API，返回包含 mission 状态的结果。
+    """
+    # 1. 获取 JD 记录
     jd_records = db.get_latest_jd(limit=5)
     if not jd_records:
         return {"ok": False, "error": "No JD record found"}
@@ -23,50 +29,55 @@ def run_pipeline(jd_record_id: Optional[str] = None) -> Dict[str, Any]:
         jd_record = next((r for r in jd_records if r["id"] == jd_record_id), None)
     jd_record = jd_record or jd_records[0]
 
-    jd_fields = extract_jd(jd_record["raw_text"])
-    logger.info("Extracted JD fields: %s", jd_fields)
+    # 2. 分类 + 归一化
+    artifact_type, confidence, reason = artifact_classifier.classify(jd_record)
+    if artifact_type != "jd" or confidence < 0.6:
+        return {
+            "ok": False,
+            "error": "Record is not a high-confidence JD",
+            "artifact_type": artifact_type,
+            "confidence": confidence,
+            "reason": reason,
+        }
 
-    all_candidates: List[Dict[str, Any]] = []
+    jd_fields = normalizer.normalize("jd", jd_record)
+    aid = db.insert_normalized_artifact({
+        "raw_ingest_id": jd_record.get("id", ""),
+        "artifact_type": artifact_type,
+        "confidence": confidence,
+        "reason": reason,
+        "normalized_payload": jd_fields,
+        "status": "pending",
+    })
 
-    talent_db_candidates = query_talent_db(jd_fields)
-    for c in talent_db_candidates:
-        c.setdefault("source_types", []).append("talent_db")
-        all_candidates.append(c)
+    # 3. 路由 → 创建 Mission
+    artifact = db.get_normalized_artifact(aid)
+    result = mission_router.route(artifact)
 
-    cc_candidates = fetch_export_jd(min_score=50)
-    for c in cc_candidates:
-        c.setdefault("source_types", []).append("candidate_collector")
-        all_candidates.append(c)
+    if result.get("action") != "mission_created":
+        return {"ok": False, "error": f"Route action: {result.get('action')}", "detail": result}
 
-    if not all_candidates:
-        return {"ok": True, "jd_record_id": jd_record["id"], "candidates_count": 0, "call_list_count": 0}
+    mid = result["mission_id"]
 
-    call_list = []
-    for cand in all_candidates:
-        cand = enrich_candidate(cand)
-        cand = score_candidate(cand, jd_fields)
-        cid = db.insert_candidate(cand)
+    # 4. 推进 Mission（created → jd_parsed → sourcing → scored）
+    mission = db.get_mission(mid)
+    for _ in range(4):  # 最多推进 4 步
+        if not mission or mission["state"] in ("closed", "problem_pending", "human_pending"):
+            break
+        orchestrator.step_mission(mission)
+        mission = db.get_mission(mid)
 
-        if cand.get("overall_score", 0) >= 40:
-            item = {
-                "candidate_id": cid,
-                "jd_record_id": jd_record["id"],
-                "priority": int(cand["overall_score"]),
-                "talking_points": generate_talking_points(cand, jd_fields),
-                "evidence": cand.get("evidence", []),
-                "status": "pending",
-            }
-            lid = db.insert_call_list(item)
-            item["id"] = lid
-            call_list.append(item)
-
-    call_list.sort(key=lambda x: x["priority"], reverse=True)
+    # 5. 返回结果
+    call_list = db.get_call_list(limit=100)
+    candidates_count = len(db.parse_json_field(mission.get("candidate_ids"), [])) if mission else 0
 
     return {
         "ok": True,
-        "jd_record_id": jd_record["id"],
+        "mission_id": mid,
+        "mission_state": mission["state"] if mission else "unknown",
+        "jd_record_id": jd_record.get("id", ""),
         "jd_fields": jd_fields,
-        "candidates_count": len(all_candidates),
+        "candidates_count": candidates_count,
         "call_list_count": len(call_list),
         "call_list": call_list,
     }
