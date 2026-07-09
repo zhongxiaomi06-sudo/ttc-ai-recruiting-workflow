@@ -1,26 +1,24 @@
-"""Storage module — provides StorageBackend via factory"""
+"""Storage module — provides a global Storage singleton for talentmatch."""
 from __future__ import annotations
 from typing import Optional
-from loguru import logger
 
-from .base import StorageBackend
-from .sqlite_backend import SqliteBackend
+from .db import Storage
 
-_backend: Optional[StorageBackend] = None
+_backend: Optional[Storage] = None
 
 
-def init_storage(db_path: Optional[str] = None) -> StorageBackend:
-    """Initialize the storage backend. Call once at startup."""
+def init_storage(db_path: Optional[str] = None, **kwargs) -> Storage:
+    """Initialize the global storage backend. Call once at startup."""
     global _backend
-    _backend = SqliteBackend(db_path=db_path)
-    logger.info(f"Storage initialized: SQLite at {_backend.db_path}")
+    if _backend is None:
+        _backend = Storage(db_path=db_path, **kwargs)
     return _backend
 
 
-def get_storage() -> StorageBackend:
+def get_storage() -> Storage:
     """Get the initialized storage backend."""
     assert _backend is not None, "Storage not initialized — call init_storage() first"
     return _backend
 
 
-__all__ = ["StorageBackend", "SqliteBackend", "init_storage", "get_storage"]
+__all__ = ["Storage", "init_storage", "get_storage"]

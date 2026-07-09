@@ -8,8 +8,21 @@ Default: http://127.0.0.1:8766
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
+
+# Make embedded talentmatch modules and the new skill package importable.
+# The daemon directory must stay at sys.path[0] so local modules shadow talentmatch modules.
+_DAEMON_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _DAEMON_DIR.parent
+_TALENTMATCH_DIR = _PROJECT_DIR / "talentmatch"
+
+for _dir in (_TALENTMATCH_DIR, _PROJECT_DIR, _DAEMON_DIR):
+    _s = str(_dir)
+    if _s in sys.path:
+        sys.path.remove(_s)
+    sys.path.insert(0, _s)
 
 import uvicorn
 from dotenv import load_dotenv
@@ -34,6 +47,13 @@ from source_talent import status as source_talent_status
 # ---------------------------------------------------------------------------
 app = FastAPI(title="TTC Daemon", version="0.2.0")
 
+# Mount TTC Skill interface (AI tool plugin / scheduling middleware)
+try:
+    import skill
+    app.include_router(skill.router)
+except Exception as exc:
+    print(f"[WARN] Failed to load skill router: {exc}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,7 +63,7 @@ app.add_middleware(
 )
 
 API_TOKEN = os.getenv("TTC_API_TOKEN")
-PUBLIC_PATHS = {"/dashboard", "/status", "/records", "/api/call-list"}
+PUBLIC_PATHS = {"/dashboard", "/status", "/records", "/api/call-list", "/skill/health"}
 PUBLIC_PREFIXES = ("/mission/", "/human/task/")
 
 
