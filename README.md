@@ -54,6 +54,33 @@ Open the local daemon directly:
 http://127.0.0.1:8766/dashboard
 ```
 
+## Public Resume Static Crawler
+
+For public or explicitly authorized static HTML pages, start with the conservative
+`httpx + BeautifulSoup` crawler:
+
+```bash
+python scripts/crawl_public_resumes_httpx.py \
+  --seed "https://example.com/resumes/" \
+  --max-pages 50 \
+  --max-depth 1 \
+  --output data/public_resume_crawl.jsonl
+```
+
+To push matched pages into the local candidate collector:
+
+```bash
+python scripts/crawl_public_resumes_httpx.py \
+  --seed-file data/resume_seed_urls.txt \
+  --send-collector \
+  --collector-url http://127.0.0.1:8765
+```
+
+This tool only fetches static HTML, respects `robots.txt` by default, rate-limits
+requests, and does not log in, replay cookies, bypass captchas, or evade platform
+controls. Use Playwright only for authorized pages that genuinely need JavaScript
+rendering.
+
 If port `8766` is already in use, stop the old local process first:
 
 ```bash
@@ -156,3 +183,26 @@ aliyun --profile ttc sts GetCallerIdentity
 ## Safety
 
 Do not commit resumes, SQLite databases, `.env` files, API keys, AccessKeys, generated auth QR images, or local virtual environments. The `.gitignore` is configured to exclude those by default.
+
+## Precise talent matching agents
+
+The production-oriented matching entrypoint is `scripts/llm_jd_match_report.py`. It runs each JD independently through these agents:
+
+1. `RecallAgent`: multi-query, multi-page TTC recall and stable-ID deduplication.
+2. `EnrichmentAgent`: optional profile enrichment without inventing missing resume content.
+3. `QualityGateAgent`: grades data A/B/C and quarantines generated fixtures.
+4. `HardFilterAgent`: applies location, age, experience, degree, and job-specific must-haves using pass/review/fail states.
+5. `SemanticScoringAgent`: evidence-constrained semantic scoring; all scores are recomputed from configured dimension weights.
+6. `AuditAgent`: prevents generated data, low-quality summaries, or unverified strong recommendations from entering final output.
+
+Run a small validation batch:
+
+```bash
+venv/bin/python scripts/llm_jd_match_report.py \
+  --limit 10 \
+  --pages 1 \
+  --enrich-limit 10 \
+  --top-n 5
+```
+
+The JSON output separates `data` (verified recommendations), `review_pool` (missing evidence or unknown hard conditions), and `rejected`. A C-grade search summary is never promoted directly into the final recommendation list.

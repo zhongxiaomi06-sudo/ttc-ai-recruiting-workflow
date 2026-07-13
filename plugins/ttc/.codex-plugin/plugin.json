@@ -1,34 +1,31 @@
 {
-  "name": "ttc-ai-headhunter",
-  "version": "0.1.0",
-  "description": "TTC AI 猎头工作流插件：把 JD 摄入、人才搜索、评分排序、电话任务派发和反馈闭环暴露给 Codex/Claude。
+  "name": "ttc",
+  "version": "0.1.0+codex.20260710035542",
+  "description": "TTC \u4eba\u624d\u641c\u7d22\u4e0e AI \u730e\u5934\u5de5\u4f5c\u6d41\u6280\u80fd\u96c6\u5408\u3002",
   "author": {
-    "name": "TTC",
-    "url": "https://github.com/zhongxiaomi06-sudo"
+    "name": "TTC"
   },
-  "homepage": "http://127.0.0.1:8766/dashboard",
-  "repository": "https://github.com/zhongxiaomi06-sudo/my-memory",
-  "license": "MIT",
-  "keywords": ["recruiting", "headhunter", "talent", "tts", "workflow"],
+  "keywords": [
+    "recruiting",
+    "headhunter",
+    "talent",
+    "workflow"
+  ],
   "skills": "./skills/",
-  "apps": "./.app.json",
-  "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "TTC AI 猎头",
-    "shortDescription": "AI 驱动的猎头工作流：JD → 人才库 → 评分 → 电话任务 → 反馈。",
-    "longDescription": "连接 TTC 本地 Daemon，自动完成 JD 解析、Source/公司人才库召回、候选人评分、电话任务生成与飞书通知，并把需要人类判断的环节以 HTML 任务页形式交付给猎头。",
+    "displayName": "TTC \u4eba\u624d\u641c\u7d22",
+    "shortDescription": "\u641c\u7d22 TTC \u4e0e Source \u4eba\u624d\u5e93\u5e76\u751f\u6210\u6bd4\u8d5b\u7ed3\u679c\u3002",
+    "longDescription": "\u63d0\u4f9b TTC TalentStore API\u3001Source MySQL \u4eba\u624d\u641c\u7d22\u548c AI \u730e\u5934\u5de5\u4f5c\u6d41\u6280\u80fd\uff0c\u53ef\u751f\u6210 HTML \u4e0e JSON \u7ed3\u679c\u3002",
     "developerName": "TTC",
     "category": "Productivity",
-    "capabilities": ["mcp"],
-    "websiteURL": "http://127.0.0.1:8766/dashboard",
-    "privacyPolicyURL": "",
-    "termsOfServiceURL": "",
-    "brandColor": "#6c5ce7",
-    "defaultPrompt": [
-      "帮我处理这个 JD，从 TTC 人才库召回候选人并生成电话任务清单"
+    "capabilities": [
+      "Search",
+      "Write"
     ],
-    "composerIcon": "./assets/ttc-icon.svg",
-    "logo": "./assets/ttc-icon.png",
-    "screenshots": []
+    "defaultPrompt": [
+      "\u4ece TTC \u4eba\u624d\u5e93\u641c\u7d22\u5019\u9009\u4eba\u5e76\u751f\u6210 HTML \u6bd4\u8d5b\u7ed3\u679c",
+      "\u68c0\u67e5 Source MySQL \u4eba\u624d\u5e93\u8fde\u63a5\u72b6\u6001"
+    ],
+    "brandColor": "#6C5CE7"
   }
 }
