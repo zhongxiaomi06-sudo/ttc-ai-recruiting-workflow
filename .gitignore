@@ -40,6 +40,15 @@ feishu-toolkit/
 rl_resume_data/
 rl_resume_data_jd_aligned/
 rl_resume_data_true_four/
+security_research/
+
+# Runtime / output directories
+output/
+tmp/
+
+# Packaged archives
+*.tar.gz
+*.zip
 
 # Secrets and keys
 *.pem
