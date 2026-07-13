@@ -21,7 +21,7 @@ class GmailSyncTests(unittest.TestCase):
             b"Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQ=\r\n--x--\r\n"
         )
         message = email.message_from_bytes(raw)
-        parts = list(gmail_sync.attachment_parts(message))
+        parts = list(gmail_sync.attachment_parts(message, gmail_sync.ALLOWED_EXTENSIONS))
         self.assertEqual(parts[0][0], "resume.pdf")
         self.assertTrue(parts[0][1].startswith(b"%PDF"))
 
@@ -30,9 +30,25 @@ class GmailSyncTests(unittest.TestCase):
         self.assertIn("filename:pdf", gmail_sync.DEFAULT_QUERY)
         self.assertIn("after:2026/07/06", gmail_sync.DEFAULT_QUERY)
 
-    def test_target_role_filter(self):
-        self.assertTrue(gmail_sync.TARGET_ROLE_TERMS.search("新消费品牌策略顾问"))
-        self.assertFalse(gmail_sync.TARGET_ROLE_TERMS.search("前端技术专家"))
+    def test_default_query_includes_images(self):
+        self.assertIn("filename:png", gmail_sync.DEFAULT_QUERY)
+        self.assertIn("filename:jpg", gmail_sync.DEFAULT_QUERY)
+
+    def test_resume_terms_match_chinese(self):
+        self.assertTrue(gmail_sync.RESUME_TERMS.search("张三的简历.pdf"))
+        self.assertTrue(gmail_sync.RESUME_TERMS.search("候选人推荐"))
+
+    def test_email_config_from_env_defaults(self):
+        config = gmail_sync.EmailSyncConfig.from_env()
+        self.assertEqual(config.imap_server, "imap.gmail.com")
+        self.assertEqual(config.imap_port, 993)
+        self.assertTrue(config.imap_ssl)
+        self.assertFalse(config.use_keychain)
+
+    def test_email_config_gmail_uses_keychain(self):
+        config = gmail_sync.EmailSyncConfig.for_gmail()
+        self.assertTrue(config.use_keychain)
+        self.assertEqual(config.imap_server, "imap.gmail.com")
 
 
 if __name__ == "__main__":

@@ -14,14 +14,16 @@
 </head>
 <body>
   <h2>TTC 候选人阅读助手</h2>
-  <div class="note">只读取你有权查看的页面。批量模式会从当前列表逐个打开候选人、收藏后关闭；遇到登录失效、验证码或访问限制立即停止。</div>
+  <div class="note">只读取你有权查看的页面。批量模式会从当前列表逐个打开候选人、收藏后关闭；遇到登录失效、验证码、访问限制或加载超时会暂停并切到前台，人工处理后可继续。</div>
   <button id="capture">收藏当前页面</button>
+  <button id="validate">验证当前页面</button>
   <button id="testLinks" class="secondary">测试识别当前列表</button>
   <div class="options">
     <label>本批数量<input id="limit" type="number" min="1" max="10" value="5"></label>
     <label>阅读间隔/秒<input id="delay" type="number" min="8" max="30" value="12"></label>
   </div>
   <button id="batch">自动阅读当前列表</button>
+  <button id="resume">继续当前批次</button>
   <button id="gmail">自动下载 Gmail 简历附件</button>
   <button id="stop" class="stop">停止自动阅读</button>
   <div id="status">空闲</div>

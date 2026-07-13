@@ -4,13 +4,38 @@
 
 ## 启动
 
+推荐使用 Python 3.12（PaddleOCR 在 Apple Silicon 上需要 Python <3.13）：
+
 ```bash
 cd candidate-collector
-python3 -m pip install -r requirements.txt
+
+# 如果使用 pyenv
+pyenv install 3.12.9
+pyenv local 3.12.9
+
+python3.12 -m pip install -r requirements.txt
 ./run.sh
 ```
 
+或指定其他 Python 解释器：
+
+```bash
+TTC_PYTHON=python3.11 ./run.sh
+```
+
 打开 <http://127.0.0.1:8765>。
+
+### PaddleOCR 启用说明
+
+当前环境如果是 Python 3.14，`paddlepaddle` 暂无官方 wheel，会自动 fallback 到 Tesseract。要启用 PaddleOCR：
+
+1. 安装 Python 3.11 或 3.12。
+2. 安装系统 Tesseract（用于 fallback）：
+   ```bash
+   brew install tesseract tesseract-lang
+   ```
+3. 在 Python 3.12 环境下安装依赖，`requirements.txt` 会自动安装 `paddlepaddle` 和 `paddleocr`。
+4. `image_processing/ocr.py` 的 `engine="auto"` 会优先尝试 PaddleOCR，失败时 fallback 到 Tesseract。
 
 ## 安装 Chrome 收藏扩展
 
@@ -50,6 +75,57 @@ python3 -m pip install -r requirements.txt
 - 其他资料：直接粘贴文本。
 - 个人 Gmail：只读搜索简历邮件，自动下载并解析 PDF/Word 附件。
 
+## 新版统一入库流水线（v2）
+
+`candidate-collector` 现在提供一条统一的简历解析与飞书多维表格入库流水线：
+
+- 输入：本地 PDF/DOC/DOCX、图片、浏览器扩展抓取的文本。
+- 输出：结构化的 `CandidateRecord`，最终写入指定的飞书人才库。
+- 默认 dry-run，先预览再真正写入。
+- 按附件 SHA-256、手机号、姓名+公司组合去重。
+
+### 命令行 dry-run
+
+```bash
+cd candidate-collector
+
+# 预览一份 PDF 会写入哪些字段（不修改飞书）
+python3 cli.py ingest-file ../简历数据/个人简历_张佩柔.pdf --dry-run
+
+# 真正写入飞书（请确认后再执行）
+python3 cli.py ingest-file ../简历数据/个人简历_张佩柔.pdf --write
+
+# 从文本写入
+python3 cli.py ingest-text --text "王小明 13812345678 ..." --dry-run
+```
+
+### HTTP API
+
+```bash
+# 解析本地文件并预览飞书 payload
+curl -X POST http://127.0.0.1:8765/api/ingest-v2/file \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/Users/ashley/Downloads/ttc的交易系统/简历数据/个人简历_张佩柔.pdf","dry_run":true}'
+
+# 解析文本
+curl -X POST http://127.0.0.1:8765/api/ingest-v2/text \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"王小明 13812345678 ...","dry_run":true}'
+
+# 查看最近入库日志
+curl http://127.0.0.1:8765/api/ingest-v2/log
+```
+
+### 飞书字段映射
+
+字段 ID 和选项通过 `lark-cli base +field-list` 从真实人才库读取，配置保存在：
+
+```text
+candidate-collector/config/feishu_field_mapping.json
+```
+
+写入时只写存储字段；`查重值` 等公式字段、系统字段、`lookup` 字段会自动跳过。
+
 ## 批量推人导出
 
 仪表盘点击“导出 JD 排序”或调用接口：
@@ -60,17 +136,62 @@ curl 'http://127.0.0.1:8765/api/export-jd?min_score=50' | python3 -m json.tool
 
 返回按 JD 对齐分排序的候选人列表，含推荐结论、证据摘要、来源链接，可直接用于向客户推人。
 
-## 连接个人 Gmail
+## 连接邮箱
+
+支持 Gmail（应用专用密码 + macOS 钥匙串）以及任意支持 IMAP 的邮箱。
+
+### Gmail
 
 1. Google 账户开启两步验证。
 2. 打开 <https://myaccount.google.com/apppasswords>，创建一个应用专用密码。
-3. 在本机运行“python3 gmail_setup.py”。
-4. 按终端提示输入个人 Gmail 地址和16位应用专用密码。密码输入时不会显示。
-5. 运行“python3 gmail_sync.py --limit 100”可以立即同步。
+3. 在本机运行 `python3 gmail_setup.py`。
+4. 运行 `python3 gmail_sync.py --limit 100` 立即同步。
 
-本地服务运行后还会每5分钟自动检查一次。当前基线日期为2026年7月6日，只读取此日期之后主题或附件名包含“简历、应聘、候选人、resume、CV”等词，且带 PDF、DOC 或 DOCX 附件的邮件。
+### 通用 IMAP 邮箱
 
-同步使用只读方式打开收件箱和 BODY.PEEK 读取，不发送、删除、移动邮件，也不改变已读状态。附件保存在 data/gmail-attachments，附件哈希用于去重；应用专用密码只保存在当前 Mac 钥匙串。
+通过环境变量配置：
+
+```bash
+export TTC_EMAIL_IMAP_SERVER=imap.example.com
+export TTC_EMAIL_IMAP_PORT=993
+export TTC_EMAIL_USERNAME=your@email.com
+export TTC_EMAIL_PASSWORD=your-app-password
+export TTC_EMAIL_QUERY="UNSEEN"
+python3 gmail_sync.py --limit 100
+```
+
+或使用 JSON 配置文件：
+
+```bash
+cp config/email_sync.example.json config/email_sync.json
+# 编辑 config/email_sync.json（不写入密码）
+python3 gmail_sync.py --config config/email_sync.json --limit 100
+```
+
+### 同步行为
+
+- 默认每 5 分钟自动检查一次。
+- 只读取收件箱，使用 `BODY.PEEK` 不改变已读状态。
+- 下载 PDF、DOC、DOCX 和常见图片附件。
+- 通过邮件 Message-ID + 附件 SHA-256 双重去重。
+- 不再按具体岗位过滤；只要附件/主题看起来像简历就会入库，岗位分类交给解析后处理。
+- 单封邮件失败会进入重试队列，不会中断整批同步。
+- 密码和令牌不写入源码、日志或 Git。
+
+### 浏览器扩展平台解析器
+
+扩展的页面解析逻辑已按平台拆分：
+
+```text
+candidate-collector/extension/parsers/
+├── common.js    # 共享工具：风险词检测、URL 归一化、平台识别
+├── boss.js      # BOSS 直聘结构化提取 + 候选人链接识别
+├── maimai.js    # 脉脉候选人链接识别
+├── liepin.js    # 猎聘候选人链接识别
+└── generic.js   # 通用回退识别
+```
+
+`background.js` 现在根据当前标签页域名注入对应的解析器文件，再执行页面读取/链接识别。新增平台时只需新增 `parsers/<platform>.js` 并在 `background.js` 的 `platformFromUrl` 映射中注册。
 
 ## 边界
 

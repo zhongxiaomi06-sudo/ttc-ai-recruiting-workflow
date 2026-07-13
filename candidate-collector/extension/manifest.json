@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TTC 候选人收藏器",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "将当前已授权招聘页面的可见文本收藏到本机 TTC 人才库",
   "permissions": ["activeTab", "scripting", "tabs", "storage", "downloads"],
   "host_permissions": [
@@ -12,9 +12,9 @@
     "https://*.maimai.cn/*",
     "https://*.linkedin.com/*",
     "https://*.51job.com/*",
-    "https://*.zhaopin.com/*"
-    ,"https://mail.google.com/*"
+    "https://*.zhaopin.com/*",
+    "https://mail.google.com/*"
   ],
-  "background": {"service_worker": "background.js"},
+  "background": {"service_worker": "background.js", "type": "module"},
   "action": {"default_popup": "popup.html", "default_title": "收藏当前候选人"}
 }

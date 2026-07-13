@@ -1,5 +1,11 @@
 const API = 'http://127.0.0.1:8765/api/capture';
 const LOCAL_IMPORT_API = 'http://127.0.0.1:8765/api/import-local-download';
+const EXTENSION_VERSION = '0.3.1';
+
+import { detectRisk, platformFromUrl, supportedHost as importedSupportedHost } from './parsers/common.js';
+import { validatePayload } from './validation.js';
+
+
 const SUPPORTED = [
   'zhipin.com', 'liepin.com', 'maimai.cn',
   'linkedin.com', '51job.com', 'zhaopin.com'
@@ -11,14 +17,20 @@ const getState = () => chrome.storage.local.get('batch').then(data => data.batch
   running: false, queue: [], total: 0, done: 0, errors: 0, current: '', message: '空闲'
 });
 const setState = state => chrome.storage.local.set({batch: state}).then(() => state);
+const RISK_WORDS = [
+  '安全验证', '请输入验证码', '访问过于频繁', '操作过于频繁',
+  '异常访问', '请完成验证', '登录后查看', '账号登录', '登录后使用',
+  '请登录', '滑块验证', '人机验证', '验证身份', '访问验证',
+  'captcha', 'verify you are human'
+];
+const NON_CANDIDATE_LABELS = [
+  '桌面客户端', '下载APP', '下载 App', '下载客户端', '手机扫码',
+  '打开APP', '打开 App', '登录', '注册', '帮助中心', '隐私政策',
+  '用户协议', '职位管理', '招聘者', '企业服务'
+];
 
 function supportedHost(url) {
-  try {
-    const host = new URL(url).hostname;
-    return SUPPORTED.some(domain => host === domain || host.endsWith('.' + domain));
-  } catch {
-    return false;
-  }
+  return importedSupportedHost(url);
 }
 
 function waitForTab(tabId, timeoutMs = 25000) {
@@ -45,101 +57,103 @@ function waitForTab(tabId, timeoutMs = 25000) {
   });
 }
 
+async function waitForTabSoft(tabId, timeoutMs = 35000) {
+  try {
+    await waitForTab(tabId, timeoutMs);
+    return {ok: true, timedOut: false};
+  } catch (error) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab && /^https?:/.test(tab.url || '')) {
+      return {ok: false, timedOut: true, error: error.message};
+    }
+    throw error;
+  }
+}
+
+function looksLikeNonCandidateLabel(label) {
+  const text = (label || '').replace(/\s+/g, '');
+  return !text || NON_CANDIDATE_LABELS.some(word => text.includes(word.replace(/\s+/g, '')));
+}
+
+function looksLikeCandidateText(text) {
+  return /(\d+\s*岁|\d+\s*年|本科|硕士|博士|大专|统招|在职|离职|求职|期望|工作经历|教育经历|咨询|战略|品牌|产品|渠道|运营|市场|经理|总监|负责人)/.test(text || '');
+}
+
+async function pauseForHuman(tab, state, message) {
+  if (tab && tab.id) await chrome.tabs.update(tab.id, {active: true}).catch(() => {});
+  await setState(Object.assign({}, state, {
+    running: false,
+    paused: true,
+    pausedTabId: tab && tab.id,
+    message
+  }));
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.set({
+    workerStatus: {
+      ok: true,
+      version: EXTENSION_VERSION,
+      installedAt: new Date().toISOString()
+    }
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.set({
+    workerStatus: {
+      ok: true,
+      version: EXTENSION_VERSION,
+      startedAt: new Date().toISOString()
+    }
+  });
+});
+
 async function readTab(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const platform = platformFromUrl(tab && tab.url ? tab.url : '');
+  const parserFiles = ['parsers/common.js'];
+  if (platform === 'boss') parserFiles.push('parsers/boss.js');
+
   const results = await chrome.scripting.executeScript({
     target: {tabId},
-    func: () => {
+    files: parserFiles,
+    func: (platformName) => {
       const text = document.body ? document.body.innerText : '';
-      const blockedWords = [
-        '安全验证', '请输入验证码', '访问过于频繁', '操作过于频繁',
-        '异常访问', '请完成验证', '登录后查看', '账号登录'
-      ];
+      const title = document.title || '';
+      const url = location.href;
+      const parsers = window.__TTC_PARSERS || {};
+      const common = parsers.common || {};
+      const detectRisk = common.detectRisk || function(t, ti, u) {
+        const words = [
+          '安全验证', '请输入验证码', '访问过于频繁', '操作过于频繁',
+          '异常访问', '请完成验证', '登录后查看', '账号登录', '登录后使用',
+          '请登录', '滑块验证', '人机验证', '验证身份', '访问验证',
+          'captcha', 'verify you are human'
+        ];
+        return words.find(w => (t + ti + u).toLowerCase().includes(w.toLowerCase())) || '';
+      };
+      const blocked = detectRisk(text, title, url);
 
-      // BOSS 在线简历结构化提取：按“个人优势/工作经历/项目经历/教育经历/技能专长”分节，
-      // 减少导航栏、聊天按钮等噪声，提高后端解析准确率。
-      function extractBossSections() {
-        const headings = ['个人优势', '工作经历', '项目经历', '教育经历', '技能专长', '求职期望'];
-        const allText = [];
-        const sections = [];
-        const addSection = (heading, lines) => {
-          if (!heading || !lines.length) return;
-          sections.push({heading, text: lines.join('\n')});
-        };
-
-        // 1. 顶部基础信息（姓名、年龄、城市、经验、学历、求职状态）
-        const basic = [];
-        const h1 = document.querySelector('h1');
-        if (h1) basic.push(h1.innerText.trim());
-        const infoEls = document.querySelectorAll(
-          '.info-label, .base-info, .job-info, [class*="info"] .text, [class*="base"] .text, .name-box .label'
-        );
-        for (const el of infoEls) {
-          const t = (el.innerText || '').trim();
-          if (t && t.length <= 80 && !basic.includes(t)) basic.push(t);
-        }
-        // 兜底：把 body 前 500 字里包含年龄/岁/经验的短文本也抓进来
-        const bodyStart = text.split('\n').slice(0, 60);
-        for (const line of bodyStart) {
-          const t = line.trim();
-          if (/\d+岁/.test(t) || /\d+年经验/.test(t) || /本科|硕士|博士/.test(t)) {
-            if (!basic.includes(t)) basic.push(t);
-          }
-        }
-        if (basic.length) {
-          sections.push({heading: '基础信息', text: basic.slice(0, 12).join('\n')});
-        }
-
-        // 2. 遍历 DOM 找分节标题，按下一个标题之前的文本聚合
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-        let currentHeading = '';
-        let currentLines = [];
-        const pushCurrent = () => {
-          if (currentHeading && currentLines.length) {
-            addSection(currentHeading, currentLines);
-          }
-          currentHeading = '';
-          currentLines = [];
-        };
-        while (walker.nextNode()) {
-          const el = walker.currentNode;
-          if (!el.innerText) continue;
-          const t = el.innerText.trim();
-          if (!t || t.length > 3000) continue;
-          // 识别节标题：文本精确匹配或靠近 icon 的短标题
-          const isHeading = headings.includes(t) || headings.some(h => t.startsWith(h + ' '));
-          if (isHeading && t.length <= 20) {
-            pushCurrent();
-            currentHeading = t.replace(/\s+/g, '');
-            continue;
-          }
-          if (currentHeading) {
-            // 过滤明显是 UI 控件的行
-            if (/^(展开|收起|查看全部|更多|编辑|删除|举报|分享|收藏|投递|立即沟通|聊一聊|发简历)$/.test(t)) continue;
-            if (t.length >= 8 && !currentLines.includes(t)) currentLines.push(t);
-          }
-        }
-        pushCurrent();
-
-        // 3. 如果没找到任何分节，回退到整页文本
-        if (sections.length <= 1) return {sections: [{heading: '全文', text}]};
-        return {sections};
+      let structured = null;
+      if (platformName === 'boss' && parsers.boss && parsers.boss.extractBossSections) {
+        structured = parsers.boss.extractBossSections();
       }
 
-      const isBoss = /zhipin\.com/.test(location.hostname) && /geek|jobhunter|candidate|resume/i.test(location.href);
-      const structured = isBoss ? extractBossSections() : null;
-
       return {
-        url: location.href,
-        title: document.title,
+        url,
+        title,
         heading: (document.querySelector('h1') && document.querySelector('h1').innerText) ||
           (document.querySelector('[class*=name]') && document.querySelector('[class*=name]').innerText) || '',
         text,
         structured_data: structured,
         captured_at: new Date().toISOString(),
         source_type: 'authorized_batch_browser',
-        blocked: blockedWords.find(word => text.includes(word)) || ''
+        blocked,
+        empty: !document.body || text.replace(/\s+/g, '').length < 30
       };
-    }
+    },
+    args: [platform]
   });
   return results[0].result;
 }
@@ -204,63 +218,34 @@ async function autoScrollList(tabId, maxRounds = 6) {
 }
 
 async function findCandidateLinks(tabId, limit) {
-  // BOSS 列表页优先用 BOSS 特有的 geek/jobhunter 链接识别，识别不到再回退通用规则。
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const platform = platformFromUrl(tab && tab.url ? tab.url : '');
+  const parserFiles = ['parsers/common.js'];
+  if (platform === 'boss') parserFiles.push('parsers/boss.js');
+  else if (platform === 'maimai') parserFiles.push('parsers/maimai.js');
+  else if (platform === 'liepin') parserFiles.push('parsers/liepin.js');
+  else parserFiles.push('parsers/generic.js');
+
   const results = await chrome.scripting.executeScript({
     target: {tabId},
-    args: [limit],
-    func: maxItems => {
-      const isBoss = /zhipin\.com/.test(location.hostname);
-      const current = location.href.split('#')[0];
-      const seen = new Map();
-
-      const add = (url, label, score) => {
-        if (!url || url.split('#')[0] === current) return;
-        const clean = url.split('#')[0];
-        const old = seen.get(clean);
-        if (!old || score > old.score) seen.set(clean, {url: clean, label: label.slice(0, 80), score});
-      };
-
-      // BOSS 特有：geek/jobhunter 详情页，排除管理/聊天/工具等后台链接
-      if (isBoss) {
-        const bossNegative = /(\/chat\/|\/message\/|\/manage\/|\/tools\/|\/prop\/|\/vip\/|\/data\/|\/company\/|\/job_detail\/)/i;
-        for (const a of document.querySelectorAll('a[href*="/geek/"], a[href*="/jobhunter/"]')) {
-          const href = a.href ? a.href.split('#')[0] : '';
-          if (!href || bossNegative.test(href)) continue;
-          // 进一步要求链接路径里 geek/jobhunter 后面跟的是 id 或数字，不是 manage 等动作
-          const pathMatch = href.match(/\/(geek|jobhunter)\/([^/]+)/);
-          if (!pathMatch) continue;
-          const segment = pathMatch[2];
-          if (/^(manage|recommend|tools|prop|data|vip|setting|help)$/i.test(segment)) continue;
-          const text = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim();
-          const card = a.closest('[class*="card"], [class*="item"], [class*="geek"], [class*="recommend"], li');
-          const cardText = card ? (card.innerText || '').replace(/\s+/g, ' ').trim() : '';
-          let score = 10;
-          if (/\d+岁/.test(cardText || text)) score += 3;
-          if (/\d+年/.test(cardText || text)) score += 3;
-          if (/(本科|硕士|博士)/.test(cardText || text)) score += 2;
-          add(href, text || cardText.slice(0, 60), score);
-        }
+    files: parserFiles,
+    func: (maxItems, platformName) => {
+      const parsers = window.__TTC_PARSERS || {};
+      if (platformName === 'boss' && parsers.boss && parsers.boss.findBossCandidateLinks) {
+        return parsers.boss.findBossCandidateLinks(maxItems);
       }
-
-      // 通用回退
-      const positive = /(geek|candidate|resume|talent|recommend|jobhunter|profile|user)/i;
-      const negative = /(login|register|privacy|help|about|company|job\/detail|chat|message|setting|job_list)/i;
-      const evidence = /(\d+\s*岁|\d+\s*年|本科|硕士|博士|咨询|战略|品牌|产品|渠道)/;
-      for (const a of document.querySelectorAll('a[href]')) {
-        if (isBoss && seen.has(a.href.split('#')[0])) continue;
-        const href = a.href ? a.href.split('#')[0] : '';
-        const text = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!href || href === current || !href.startsWith(location.origin) || negative.test(href)) continue;
-        let score = 0;
-        if (positive.test(href)) score += 5;
-        if (evidence.test(text)) score += 3;
-        if (text.length >= 2 && text.length <= 160) score += 1;
-        if (a.closest('[class*=candidate],[class*=resume],[class*=geek],[class*=talent],[class*=card],[class*=item]')) score += 3;
-        if (score < 4) continue;
-        add(href, text, score);
+      if (platformName === 'maimai' && parsers.maimai && parsers.maimai.findMaimaiCandidateLinks) {
+        return parsers.maimai.findMaimaiCandidateLinks(maxItems);
       }
-      return Array.from(seen.values()).sort((a, b) => b.score - a.score).slice(0, maxItems);
-    }
+      if (platformName === 'liepin' && parsers.liepin && parsers.liepin.findLiepinCandidateLinks) {
+        return parsers.liepin.findLiepinCandidateLinks(maxItems);
+      }
+      if (parsers.generic && parsers.generic.findGenericCandidateLinks) {
+        return parsers.generic.findGenericCandidateLinks(maxItems);
+      }
+      return [];
+    },
+    args: [limit, platform]
   });
   return results[0].result || [];
 }
@@ -285,18 +270,21 @@ async function runBatch() {
     let tab;
     try {
       tab = await chrome.tabs.create({url: item.url, active: false});
-      await waitForTab(tab.id);
-      await sleep(2500);
-      const payload = await readTab(tab.id);
-      if (payload.blocked) {
-        await chrome.tabs.update(tab.id, {active: true});
-        await setState(Object.assign({}, state, {
-          running: false,
-          message: '已暂停，需要人工处理：' + payload.blocked
-        }));
+      const loaded = await waitForTabSoft(tab.id);
+      if (loaded.timedOut) {
+        await pauseForHuman(tab, state, '已暂停：页面加载超时，请在打开的页面确认是否需要登录/验证，完成后点“继续当前批次”');
         return;
       }
-      if (!payload.text || payload.text.length < 80) throw new Error('页面可见内容不足');
+      await sleep(3500);
+      const payload = await readTab(tab.id);
+      if (payload.blocked) {
+        await pauseForHuman(tab, state, '已暂停，需要人工处理：' + payload.blocked + '。完成后点“继续当前批次”');
+        return;
+      }
+      if (payload.empty || !payload.text || payload.text.length < 80) {
+        await pauseForHuman(tab, state, '已暂停：页面可见内容不足，请确认是否仍在加载、登录或验证页，完成后点“继续当前批次”');
+        return;
+      }
       const candidate = await saveCapture(payload);
       const latest = await getState();
       state = Object.assign({}, latest, {
@@ -361,6 +349,54 @@ async function startBatch(limit, delaySeconds) {
   });
   batchPromise = runBatch().finally(() => { batchPromise = null; });
   return state;
+}
+
+async function resumeBatch() {
+  const state = await getState();
+  if (state.running) throw new Error('已有批量任务正在运行');
+  if (!state.queue || !state.queue.length) throw new Error('没有可继续的批量队列');
+
+  if (state.pausedTabId) {
+    const tab = await chrome.tabs.get(state.pausedTabId).catch(() => null);
+    if (tab && tab.id) {
+      const payload = await readTab(tab.id);
+      if (payload.blocked || payload.empty || !payload.text || payload.text.length < 80) {
+        await pauseForHuman(tab, state, payload.blocked ?
+          '仍需人工处理：' + payload.blocked :
+          '仍未读到候选人内容，请确认当前页已经加载出简历详情');
+        return await getState();
+      }
+      const candidate = await saveCapture(payload);
+      await chrome.tabs.remove(tab.id).catch(() => {});
+      const updated = await setState(Object.assign({}, state, {
+        queue: state.queue.slice(1),
+        done: (state.done || 0) + 1,
+        current: candidate.name,
+        paused: false,
+        pausedTabId: null,
+        message: '已收藏 ' + candidate.name + '（' + candidate.score + '分），继续当前批次'
+      }));
+      if (!updated.queue.length) {
+        return await setState(Object.assign({}, updated, {
+          running: false,
+          current: '',
+          message: '完成，失败 ' + (updated.errors || 0) + ' 条'
+        }));
+      }
+      const nextRunning = await setState(Object.assign({}, updated, {running: true}));
+      batchPromise = runBatch().finally(() => { batchPromise = null; });
+      return nextRunning;
+    }
+  }
+
+  const next = await setState(Object.assign({}, state, {
+    running: true,
+    paused: false,
+    pausedTabId: null,
+    message: '继续当前批次'
+  }));
+  batchPromise = runBatch().finally(() => { batchPromise = null; });
+  return next;
 }
 
 async function testCandidateLinks(limit) {
@@ -497,8 +533,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const candidate = await captureCurrent();
       return {ok: true, candidate};
     }
+    if (message.type === 'ping') {
+      return {ok: true, version: EXTENSION_VERSION};
+    }
+    if (message.type === 'validatePage') {
+      const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+      const tab = tabs[0];
+      if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) throw new Error('当前不是可验证网页');
+      const payload = await readTab(tab.id);
+      payload.platform = platformFromUrl(tab.url);
+      if (payload.platform === 'maimai' || payload.platform === 'liepin') {
+        payload.links = await findCandidateLinks(tab.id, 1);
+      }
+      return {ok: true, checks: validatePayload(payload)};
+    }
     if (message.type === 'startBatch') {
       const state = await startBatch(message.limit || 5, message.delaySeconds || 12);
+      return {ok: true, state};
+    }
+    if (message.type === 'resumeBatch') {
+      const state = await resumeBatch();
       return {ok: true, state};
     }
     if (message.type === 'testLinks') {

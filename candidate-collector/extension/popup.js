@@ -1,6 +1,7 @@
 const statusBox = document.getElementById('status');
 const debugBox = document.getElementById('debug');
 const batchButton = document.getElementById('batch');
+const resumeButton = document.getElementById('resume');
 
 function send(message) {
   return new Promise((resolve, reject) => {
@@ -23,6 +24,7 @@ function showState(state) {
     (state.current ? ' · ' + state.current : '') +
     (state.message ? ' · ' + state.message : '');
   batchButton.disabled = Boolean(state.running);
+  resumeButton.disabled = Boolean(state.running) || !(state.queue && state.queue.length);
 }
 
 document.getElementById('capture').addEventListener('click', async () => {
@@ -33,6 +35,28 @@ document.getElementById('capture').addEventListener('click', async () => {
     statusBox.textContent = '已收藏：' + response.candidate.name + '（' + response.candidate.score + '分）';
   } catch (error) {
     statusBox.textContent = '失败：' + error.message;
+  }
+});
+
+document.getElementById('validate').addEventListener('click', async () => {
+  statusBox.textContent = '正在验证当前页面...';
+  debugBox.textContent = '';
+  try {
+    const response = await send({type: 'validatePage'});
+    const checks = response.checks || {};
+    const parts = [
+      checks.ok ? '✅ 验证通过' : '⚠️ 验证未通过',
+      `平台：${checks.platform || '未知'}`,
+      `文本：${checks.hasText ? '足够' : '不足'}`,
+      `结构化：${checks.hasStructuredData ? '已提取' : '未提取'}`,
+    ];
+    if (checks.hasWorkExperience !== undefined) parts.push(`工作经历：${checks.hasWorkExperience ? '有' : '无'}`);
+    if (checks.hasEducationExperience !== undefined) parts.push(`教育经历：${checks.hasEducationExperience ? '有' : '无'}`);
+    if (checks.hasCandidateLinks !== undefined) parts.push(`候选人链接：${checks.hasCandidateLinks ? '有' : '无'}`);
+    statusBox.textContent = parts.join(' · ');
+    debugBox.textContent = JSON.stringify(checks, null, 2);
+  } catch (error) {
+    statusBox.textContent = '验证失败：' + error.message;
   }
 });
 
@@ -59,6 +83,17 @@ document.getElementById('batch').addEventListener('click', async () => {
     showState(response.state);
   } catch (error) {
     statusBox.textContent = '无法启动：' + error.message;
+  }
+});
+
+document.getElementById('resume').addEventListener('click', async () => {
+  statusBox.textContent = '正在继续当前批次...';
+  debugBox.textContent = '';
+  try {
+    const response = await send({type: 'resumeBatch'});
+    showState(response.state);
+  } catch (error) {
+    statusBox.textContent = '无法继续：' + error.message;
   }
 });
 
@@ -92,5 +127,12 @@ async function refresh() {
   }
 }
 
-refresh();
+send({type: 'ping'})
+  .then(response => {
+    debugBox.textContent = '后台已连接 v' + response.version;
+    return refresh();
+  })
+  .catch(error => {
+    statusBox.textContent = '后台未启动：请在 chrome://extensions 刷新 TTC 扩展。' + error.message;
+  });
 setInterval(refresh, 1200);
