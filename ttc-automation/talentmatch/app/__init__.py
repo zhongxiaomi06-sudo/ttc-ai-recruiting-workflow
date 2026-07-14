@@ -66,6 +66,7 @@ def create_app() -> FastAPI:
             aggregator.start()
             _pipelines["tracking_aggregator"] = aggregator
         except Exception as e:
+            logger.warning(f"Tracking aggregator failed to start: {e}")
 
         logger.info("TalentMatch v6 ready ✅")
 

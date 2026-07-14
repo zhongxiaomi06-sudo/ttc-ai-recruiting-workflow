@@ -9,10 +9,31 @@ from .config import DATA_DIR
 DB_PATH = DATA_DIR / "ttc_daemon.db"
 
 
+class _Conn:
+    """包装 sqlite3.Connection，使其支持 with 语句并在退出时自动关闭。"""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def __enter__(self) -> sqlite3.Connection:
+        return self._conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+        self._conn.close()
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    return conn
+    return _Conn(conn)
 
 
 def init_db():
@@ -83,6 +104,9 @@ def init_db():
                 gold_score REAL,
                 risk_flags TEXT,
                 overall_score REAL,
+                original_attachment_path TEXT,
+                attachment_url TEXT,
+                attachment_mime_type TEXT,
                 status TEXT DEFAULT 'new',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -174,6 +198,9 @@ def init_db():
         _ensure_column(conn, "read_jobs", "error_reason", "TEXT")
         _ensure_column(conn, "normalized_artifacts", "reason", "TEXT")
         _ensure_column(conn, "call_list", "mission_id", "TEXT")
+        _ensure_column(conn, "candidates", "original_attachment_path", "TEXT")
+        _ensure_column(conn, "candidates", "attachment_url", "TEXT")
+        _ensure_column(conn, "candidates", "attachment_mime_type", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -228,7 +255,7 @@ def insert_ingest(record: Dict[str, Any]) -> str:
                 record.get("error", ""),
                 json.dumps(record.get("capture_meta", {}), ensure_ascii=False),
                 json.dumps(record, ensure_ascii=False),
-                record.get("collected_at") or datetime.datetime.utcnow().isoformat() + "Z",
+                record.get("collected_at") or _utc_iso(),
             ),
         )
     return rid
@@ -453,13 +480,14 @@ def get_unrouted_jd_artifacts(limit: int = 100) -> List[Dict[str, Any]]:
 
 def insert_candidate(candidate: Dict[str, Any]) -> str:
     cid = candidate.get("id") or ("cand_" + uuid.uuid4().hex[:16])
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = _utc_iso()
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO candidates (id, name, phone, email, source_types, raw_profile, enriched_profile,
-                                    jd_alignment_score, gold_score, risk_flags, overall_score, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    jd_alignment_score, gold_score, risk_flags, overall_score,
+                                    original_attachment_path, attachment_url, attachment_mime_type, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 raw_profile=excluded.raw_profile,
                 enriched_profile=excluded.enriched_profile,
@@ -467,6 +495,9 @@ def insert_candidate(candidate: Dict[str, Any]) -> str:
                 gold_score=excluded.gold_score,
                 risk_flags=excluded.risk_flags,
                 overall_score=excluded.overall_score,
+                original_attachment_path=COALESCE(excluded.original_attachment_path, candidates.original_attachment_path),
+                attachment_url=COALESCE(excluded.attachment_url, candidates.attachment_url),
+                attachment_mime_type=COALESCE(excluded.attachment_mime_type, candidates.attachment_mime_type),
                 updated_at=excluded.updated_at
             """,
             (
@@ -475,16 +506,41 @@ def insert_candidate(candidate: Dict[str, Any]) -> str:
                 candidate.get("phone", ""),
                 candidate.get("email", ""),
                 json.dumps(candidate.get("source_types", []), ensure_ascii=False),
-                json.dumps(candidate.get("raw_profile", {}), ensure_ascii=False),
-                json.dumps(candidate.get("enriched_profile", {}), ensure_ascii=False),
+                json.dumps(candidate.get("raw_profile", {}), ensure_ascii=False, default=str),
+                json.dumps(candidate.get("enriched_profile", {}), ensure_ascii=False, default=str),
                 candidate.get("jd_alignment_score", 0.0),
                 candidate.get("gold_score", 0.0),
                 json.dumps(candidate.get("risk_flags", []), ensure_ascii=False),
                 candidate.get("overall_score", 0.0),
+                candidate.get("original_attachment_path", ""),
+                candidate.get("attachment_url", ""),
+                candidate.get("attachment_mime_type", ""),
                 now,
             ),
         )
     return cid
+
+
+def update_candidate_attachment(
+    candidate_id: str,
+    *,
+    original_attachment_path: str = "",
+    attachment_url: str = "",
+    attachment_mime_type: str = "",
+) -> None:
+    """更新候选人的 PDF/附件路径（用于同步脚本）。"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE candidates
+            SET original_attachment_path = COALESCE(NULLIF(?, ''), original_attachment_path),
+                attachment_url = COALESCE(NULLIF(?, ''), attachment_url),
+                attachment_mime_type = COALESCE(NULLIF(?, ''), attachment_mime_type),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (original_attachment_path, attachment_url, attachment_mime_type, _utc_iso(), candidate_id),
+        )
 
 
 def insert_call_list(item: Dict[str, Any]) -> str:
@@ -567,7 +623,12 @@ def save_raw_file(record: Dict[str, Any]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-now_iso = lambda: datetime.datetime.utcnow().isoformat() + "Z"
+def _utc_iso() -> str:
+    """返回兼容旧格式的 UTC ISO 时间字符串（带 Z 后缀）。"""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+now_iso = _utc_iso
 
 
 def insert_mission(

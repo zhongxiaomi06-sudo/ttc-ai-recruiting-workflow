@@ -7,3 +7,5 @@ httpx>=0.28  # required by fastapi.testclient
 opencv-python>=4.10,<5  # image preprocessing for OCR
 paddlepaddle>=2.6,<3; python_version < "3.13" and platform_machine == "arm64"
 paddleocr>=2.8,<3
+pymysql>=1.1,<2  # cloud RDS sync (MySQL)
+python-dotenv>=1.0,<2      # load .env for cloud sync

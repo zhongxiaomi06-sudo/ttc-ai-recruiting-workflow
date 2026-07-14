@@ -70,6 +70,11 @@ class MissionStartRequest(BaseModel):
     normalized_artifact_id: Optional[str] = None
 
 
+class FeishuBaseSearchRequest(BaseModel):
+    jd_fields: Dict[str, Any] = Field(default_factory=dict)
+    limit: int = Field(default=50, ge=1, le=200)
+
+
 # ---------------------------------------------------------------------------
 # 后台调度器
 # ---------------------------------------------------------------------------
@@ -328,6 +333,14 @@ def list_missions(limit: int = 100):
                     pass
         items.append(item)
     return {"ok": True, "count": len(items), "items": items}
+
+
+@app.post("/api/search/feishu-base", dependencies=[Depends(require_api_token)])
+def search_feishu_base(req: FeishuBaseSearchRequest):
+    """按 JD 字段搜索飞书人才库，返回候选列表。"""
+    from .feishu_base_search import query_feishu_base
+    candidates = query_feishu_base(req.jd_fields, limit=req.limit)
+    return {"ok": True, "total": len(candidates), "candidates": candidates}
 
 
 @app.post("/api/human/task/{tid}/complete", dependencies=[Depends(require_api_token)])

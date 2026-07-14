@@ -45,6 +45,10 @@ security_research/
 # Runtime / output directories
 output/
 tmp/
+logs/
+*.out
+logs_app.out
+*.log
 
 # Packaged archives
 *.tar.gz

@@ -8,6 +8,8 @@ about specific storage backends.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -137,7 +139,7 @@ class CandidateRecord(BaseModel):
             return digits
         if len(digits) >= 7:
             return digits
-        return value.strip() or None
+        return None
 
     @field_validator("email")
     @classmethod
@@ -164,13 +166,18 @@ class CandidateRecord(BaseModel):
         """Return a stable string used for duplicate detection.
 
         Prefer SHA-256 of the attachment, then phone, then name+company+title.
+        When all identifying fields are empty, fall back to a hash of the raw
+        text so different empty records do not collapse to the same fingerprint.
         """
         if self.attachment_sha256:
             return f"sha256|{self.attachment_sha256}"
         if self.phone:
             return f"phone|{self.phone}"
         parts = [self.name or "", self.current_company or "", self.current_title or ""]
-        return "name_company_title|" + "|".join(parts)
+        if any(parts):
+            return "name_company_title|" + "|".join(parts)
+        raw = self.raw_text or self.source_url or self.captured_at or ""
+        return "raw_hash|" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def to_db_dict(self) -> dict[str, Any]:
         """Flatten the record for the existing SQLite candidates table.
@@ -194,9 +201,9 @@ class CandidateRecord(BaseModel):
             "employment_status": self.employment_status or "",
             "expected_salary": self.expected_salary or "",
             "summary": "",
-            "experiences_json": self.model_dump().get("work_experiences", []),
-            "education_json": self.model_dump().get("education", {}),
-            "keywords_json": self.skills,
+            "experiences_json": json.dumps(self.model_dump().get("work_experiences", []), ensure_ascii=False),
+            "education_json": json.dumps(self.model_dump().get("education", {}), ensure_ascii=False),
+            "keywords_json": json.dumps(self.skills, ensure_ascii=False),
             "hard_filter_reason": "",
             "raw_text": self.raw_text,
         }

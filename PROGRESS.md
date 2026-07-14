@@ -33,7 +33,9 @@
 | JD 对齐评分 | ✅ | 含启承资本画像分 |
 | CLI / HTTP API | ✅ | `cli.py`, `app.py` |
 | 批量导入脚本 | ✅ | `scripts/batch_import_remaining.py` |
-| 手机号恢复脚本 | ✅ | `scripts/recover_phones.py` |
+| 手机号恢复脚本 | ✅ | `scripts/recover_phones.py`（正则修复） |
+| 马赛克手机号视觉恢复 | ✅ | `parsers/mosaic_phone_recovery.py` + `scripts/batch_recover_mosaic_phones.py`，Kimi vision，强制人审；已生成 `data/mosaic_review.html` 人工复核页 |
+| TTC 评分简历手机号恢复 | ✅ | `scripts/download_and_recover_ttc_resumes.py`：API 下载附件 PDF → Kimi vision 恢复；38 人中 2 人恢复成功 |
 
 ### 2.2 ttc_daemon（AI 招聘工作流）
 
@@ -86,7 +88,7 @@
 - [ ] BOSS 公共邮箱通路端到端验证
 - [ ] 有效简历 4 要素校验（完整简历、手机号、求职意向、薪资职级）
 - [ ] 无手机号简历通过公域人才库撞库补全
-- [ ] 批量从已接入人才库 API 拉取简历
+- [x] 批量从已接入人才库 API 拉取简历
 - [ ] 简单 dashboard 查看人才库增长数据
 
 ---

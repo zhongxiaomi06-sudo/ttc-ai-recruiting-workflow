@@ -18,6 +18,7 @@ import fitz
 
 from image_processing.ocr import OcrResult, ocr_pdf
 from models import CandidateRecord, Education, FieldConfidence, WorkExperience
+from parsers.mosaic_phone_recovery import RecoveryResult, recover_phone
 
 
 SUPPORTED_OFFICE = {".doc", ".docx"}
@@ -32,7 +33,8 @@ PHONE_GENERIC_RE = re.compile(r"(?<![\d])\d{7,15}(?![\d])")
 
 SCHOOL_RE = re.compile(r"([^\n]{2,20}(?:大学|学院|分校|研究院|School|University|College))")
 DEGREE_RE = re.compile(r"(本科|硕士|博士|大专|专科|MBA|EMBA|研究生|学士|Bachelor|Master|Ph\.?D)")
-GRAD_YEAR_RE = re.compile(r"(20\d{2})\s*年?\s*(?:毕业|届)?")
+# Graduation year: require an explicit 毕业/届 marker to avoid matching any 20xx year.
+GRAD_YEAR_RE = re.compile(r"(20\d{2})\s*年?\s*(?:毕业|届)")
 
 CITY_LIST = [
     "北京", "上海", "深圳", "广州", "杭州", "成都", "苏州", "南京", "重庆",
@@ -42,11 +44,11 @@ CITY_LIST = [
 ]
 
 EMPLOYMENT_STATUS_KEYWORDS = {
-    "在职": "在职",
-    "离职": "离职",
-    "离职-随时到岗": "离职-随时到岗",
-    "在职-考虑机会": "在职-考虑机会",
     "在职-暂不考虑": "在职-暂不考虑",
+    "在职-考虑机会": "在职-考虑机会",
+    "在职": "在职",
+    "离职-随时到岗": "离职-随时到岗",
+    "离职": "离职",
     "正在找工作": "正在找工作",
     "看机会": "看机会",
 }
@@ -173,8 +175,9 @@ def _extract_name(text: str, filename: str = "") -> str | None:
             continue
         if re.fullmatch(r"[一-鿿·]{2,4}", line):
             return line
-        # Name followed by " 男 28岁" etc.
-        m = re.match(r"([一-鿿·]{2,4})\s*[男女]?\s*\d{0,2}", line)
+        # Name followed by " 男 28岁" etc. Require at least one digit so plain
+        # 2-4 character lines are not mis-identified as names.
+        m = re.match(r"([一-鿿·]{2,4})\s*[男女]?\s*\d{1,2}", line)
         if m and not re.search(r"(职位|公司|学校|专业|经验|北京|上海|深圳|广州)", line):
             return m.group(1)
     return None
@@ -319,7 +322,9 @@ def _extract_experiences(text: str) -> tuple[list[WorkExperience], float]:
                     if company_pos >= 0:
                         consumed.add(company_pos)
         else:
-            # Fallback heuristic for resumes without explicit periods.
+            # Fallback heuristic for resumes without explicit periods.  Require a
+            # period nearby and a valid company/role pair to avoid matching random
+            # adjacent lines.
             i = 0
             while i < len(scan_lines) - 1:
                 company = scan_lines[i].strip()
@@ -330,7 +335,7 @@ def _extract_experiences(text: str) -> tuple[list[WorkExperience], float]:
                     if m:
                         period = m.group(0)
                         break
-                if _looks_like_company(company) and _looks_like_role(role):
+                if period and _looks_like_company(company) and _looks_like_role(role):
                     entries.append(WorkExperience(company=company, role=role, period=period))
                     i += 3
                     continue
@@ -356,6 +361,18 @@ def _extract_education(text: str) -> Education | None:
                 degree=degree_match.group(1) if degree_match else None,
                 graduation_year=int(grad_match.group(1)) if grad_match else None,
             )
+    return None
+
+
+def _infer_expected_location(text: str) -> str | None:
+    """Look for an explicit expectation/intention city before falling back."""
+    # Lines like: 期望城市：北京 / 意向工作地点：上海 / 期望工作城市：深圳
+    pattern = re.compile(r"(?:期望|意向)(?:工作)?(?:城市|地点|工作地点)\s*[：:]\s*([^\n，。；,;]{1,20})")
+    for m in pattern.finditer(text):
+        candidate = m.group(1).strip()
+        for city in CITY_LIST:
+            if city in candidate:
+                return city
     return None
 
 
@@ -393,13 +410,14 @@ def _infer_skills(text: str) -> list[str]:
         "大模型", "机器学习", "深度学习", "自然语言处理", "计算机视觉",
         "产品规划", "用户研究", "数据分析", "SQL", "Tableau", "Figma",
     ]
+    # Normalize Chinese punctuation to spaces so skill tokens are separated.
     normalized = text.replace("。", " ").replace("，", " ").replace("、", " ").replace("；", " ").replace("·", " ")
-    tokens = {t.strip(".,;:!?()[]{}'\"").lower() for t in normalized.split()}
     found = []
     for skill in skills:
-        if skill.lower() in tokens:
-            found.append(skill)
-        elif skill.lower() in normalized.lower():
+        # Word-boundary aware: do not match Java inside JavaScript, but allow a
+        # Chinese prefix such as "使用Java".
+        escaped = re.escape(skill)
+        if re.search(rf"(?<![a-zA-Z]){escaped}(?![a-zA-Z])", normalized, re.IGNORECASE):
             found.append(skill)
     return found
 
@@ -409,6 +427,7 @@ def _build_confidences(
     name_confidence: float,
     ocr_confidence: float,
     exp_confidence: float,
+    phone_recovery: RecoveryResult | None = None,
 ) -> list[FieldConfidence]:
     """Populate per-field confidence metadata."""
     confidences: list[FieldConfidence] = []
@@ -417,7 +436,14 @@ def _build_confidences(
         confidences.append(FieldConfidence(field=field, confidence=round(conf, 2), note=note))
 
     add("name", name_confidence)
-    add("phone", 1.0 if record.phone else 0.0)
+    if phone_recovery and record.phone == phone_recovery.phone:
+        add(
+            "phone",
+            phone_recovery.confidence,
+            f"mosaic_recovery ({phone_recovery.source}); {phone_recovery.reasoning or ''}".strip(),
+        )
+    else:
+        add("phone", 1.0 if record.phone else 0.0)
     add("email", 1.0 if record.email else 0.0)
 
     current_company_conf = 0.0
@@ -486,6 +512,7 @@ def _post_process_record(
     name_confidence: float,
     ocr_confidence: float,
     exp_confidence: float,
+    phone_recovery: RecoveryResult | None = None,
 ) -> CandidateRecord:
     """Derive current company/title, compute confidences and completeness."""
     if record.work_experiences:
@@ -495,7 +522,7 @@ def _post_process_record(
         if not record.current_title:
             record.current_title = first.role
 
-    record.field_confidences = _build_confidences(record, name_confidence, ocr_confidence, exp_confidence)
+    record.field_confidences = _build_confidences(record, name_confidence, ocr_confidence, exp_confidence, phone_recovery)
     record.parse_confidence = _compute_parse_confidence(record.field_confidences)
 
     missing = []
@@ -558,7 +585,7 @@ def parse_resume_file(path: Path | str) -> CandidateRecord:
         current_location=_infer_location(cleaned),
         employment_status=_infer_employment_status(cleaned),
         expected_salary=_infer_salary(cleaned),
-        expected_location=_infer_location(cleaned),
+        expected_location=_infer_expected_location(cleaned),
         skills=_infer_skills(cleaned),
         tech_stack=_infer_skills(cleaned),
         work_experiences=work_experiences,
@@ -566,15 +593,36 @@ def parse_resume_file(path: Path | str) -> CandidateRecord:
         raw_text=cleaned,
         original_attachment_path=str(path),
         attachment_sha256=sha256,
-        attachment_mime_type={".pdf": "application/pdf", ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}.get(suffix),
+        attachment_mime_type={
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".tiff": "image/tiff",
+            ".tif": "image/tiff",
+            ".bmp": "image/bmp",
+            ".webp": "image/webp",
+        }.get(suffix),
         source_type="local_file",
         source_platform="local_file",
         parser_name=parser_name,
         parser_version="0.1.0",
-        review_status="needs_review" if (suffix in SUPPORTED_IMAGES or parser_name in ("tesseract", "paddleocr")) else "pending",
+        review_status="needs_review" if (not cleaned or suffix in SUPPORTED_IMAGES or parser_name in ("tesseract", "paddleocr")) else "pending",
     )
 
-    return _post_process_record(record, name_confidence, ocr_confidence, exp_confidence)
+    phone_recovery: RecoveryResult | None = None
+    source_is_visual = suffix in SUPPORTED_IMAGES or parser_name in ("tesseract", "paddleocr")
+    if not record.phone and source_is_visual:
+        recovered = recover_phone(path, parser_name, ocr_confidence)
+        if recovered and recovered.phone:
+            record.phone = recovered.phone
+            record.review_status = "needs_review"
+            record.notes = (record.notes or "") + f"\nPhone recovered via {recovered.source}."
+            phone_recovery = recovered
+
+    return _post_process_record(record, name_confidence, ocr_confidence, exp_confidence, phone_recovery)
 
 
 def parse_resume_text(text: str, title: str = "", source_url: str = "", source_type: str = "manual_text") -> CandidateRecord:
@@ -593,7 +641,7 @@ def parse_resume_text(text: str, title: str = "", source_url: str = "", source_t
         current_location=_infer_location(cleaned),
         employment_status=_infer_employment_status(cleaned),
         expected_salary=_infer_salary(cleaned),
-        expected_location=_infer_location(cleaned),
+        expected_location=_infer_expected_location(cleaned),
         skills=_infer_skills(cleaned),
         tech_stack=_infer_skills(cleaned),
         work_experiences=work_experiences,

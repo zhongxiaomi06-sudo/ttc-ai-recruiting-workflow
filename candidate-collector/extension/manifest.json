@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TTC 候选人收藏器",
-  "version": "0.3.2",
-  "description": "将当前已授权招聘页面的可见文本收藏到本机 TTC 人才库",
+  "version": "0.4.0",
+  "description": "将当前已授权招聘页面的候选人一键收藏到本机 TTC 人才库或直接导入飞书多维表格",
   "permissions": ["activeTab", "scripting", "tabs", "storage", "downloads"],
   "host_permissions": [
     "http://127.0.0.1:8765/*",
@@ -13,8 +13,16 @@
     "https://*.linkedin.com/*",
     "https://*.51job.com/*",
     "https://*.zhaopin.com/*",
+    "https://app.ttcadvisory.com/*",
     "https://mail.google.com/*"
   ],
   "background": {"service_worker": "background.js", "type": "module"},
-  "action": {"default_popup": "popup.html", "default_title": "收藏当前候选人"}
+  "content_scripts": [
+    {
+      "matches": ["https://app.ttcadvisory.com/*"],
+      "js": ["content/auto_import.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {"default_popup": "popup.html", "default_title": "TTC自动导入飞书"}
 }

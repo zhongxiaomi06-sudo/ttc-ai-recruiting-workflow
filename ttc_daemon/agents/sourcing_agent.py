@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 
 from .. import db
 from ..candidate_collector_client import fetch_export_jd
+from ..feishu_base_search import query_feishu_base
 from ..pipeline import enrich_candidate
 from ..talent_db_adapter import query_talent_db, query_source_company_db
 
@@ -30,6 +31,14 @@ def search(mission: Dict[str, Any], jd_fields: Dict[str, Any]) -> List[Dict[str,
             all_candidates.append(c)
     except Exception as e:
         logger.warning("Source company DB query failed: %s", e)
+
+    # 飞书人才库
+    try:
+        for c in query_feishu_base(jd_fields):
+            c.setdefault("source_types", []).append("feishu_base")
+            all_candidates.append(c)
+    except Exception as e:
+        logger.warning("Feishu Base query failed: %s", e)
 
     # candidate-collector
     try:

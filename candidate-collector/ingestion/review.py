@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from adapters.feishu_base import FeishuBaseAdapter
-from models import CandidateRecord, Education, WorkExperience
+from models import CandidateRecord, Education, FieldConfidence, WorkExperience
 from ingestion.pipeline import _db_conn, _extract_record_id, init_ingestion_tables, record_fingerprint
 
 
@@ -148,6 +148,8 @@ def approve_record(
         try:
             resp = adapter.create_record(record)
             feishu_record_id = _extract_record_id(resp)
+            if not feishu_record_id:
+                raise RuntimeError(f"create_record did not return a record_id: {resp}")
             write_status = "success"
         except Exception as exc:
             return {"ok": False, "error": f"飞书写入失败：{exc}"}

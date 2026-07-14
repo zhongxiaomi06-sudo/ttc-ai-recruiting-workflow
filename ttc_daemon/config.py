@@ -60,6 +60,22 @@ FEISHU_BOT_CONFIG = {
     "dashboard_url": os.getenv("TTC_DASHBOARD_URL", "http://127.0.0.1:8766"),
 }
 
+# 飞书人才库搜索配置
+FEISHU_BASE_CONFIG = {
+    "enabled": os.getenv("TTC_FEISHU_BASE_ENABLED", "false").lower() == "true",
+    "base_token": os.getenv("TTC_FEISHU_BASE_TOKEN", "DIIdbR2c8ax8bTsZoNKcnX6enSe"),
+    "table_id": os.getenv("TTC_FEISHU_BASE_TABLE_ID", "tblWFuBQrPmllE9W"),
+    "view_id": os.getenv("TTC_FEISHU_BASE_VIEW_ID", "vewhTzpFAm"),
+    "mapping_path": os.getenv(
+        "TTC_FEISHU_BASE_MAPPING_PATH",
+        str(Path(__file__).parent / "config" / "feishu_base_mapping.json"),
+    ),
+    "max_queries": int(os.getenv("TTC_FEISHU_BASE_MAX_QUERIES", "10")),
+    "search_limit": int(os.getenv("TTC_FEISHU_BASE_SEARCH_LIMIT", "20")),
+    "rate_limit_qps": float(os.getenv("TTC_FEISHU_BASE_RATE_LIMIT_QPS", "2")),
+    "keyword_max_len": int(os.getenv("TTC_FEISHU_BASE_KEYWORD_MAX_LEN", "50")),
+}
+
 # LLM 配置（可选）
 LLM_CONFIG = {
     "provider": os.getenv("TTC_LLM_PROVIDER", "openai"),  # openai / kimi / none

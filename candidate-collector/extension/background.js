@@ -1,6 +1,7 @@
 const API = 'http://127.0.0.1:8765/api/capture';
+const IMPORT_API = 'http://127.0.0.1:8765/api/import-browser-capture';
 const LOCAL_IMPORT_API = 'http://127.0.0.1:8765/api/import-local-download';
-const EXTENSION_VERSION = '0.3.1';
+const EXTENSION_VERSION = '0.4.0';
 
 import { detectRisk, platformFromUrl, supportedHost as importedSupportedHost } from './parsers/common.js';
 import { validatePayload } from './validation.js';
@@ -114,11 +115,28 @@ async function readTab(tabId) {
   const platform = platformFromUrl(tab && tab.url ? tab.url : '');
   const parserFiles = ['parsers/common.js'];
   if (platform === 'boss') parserFiles.push('parsers/boss.js');
+  if (platform === 'maimai') parserFiles.push('parsers/maimai.js');
+  if (platform === 'liepin') parserFiles.push('parsers/liepin.js');
+  if (platform === 'ttc') parserFiles.push('parsers/ttc.js');
 
+  await chrome.scripting.executeScript({
+    target: {tabId},
+    files: parserFiles
+  });
   const results = await chrome.scripting.executeScript({
     target: {tabId},
-    files: parserFiles,
-    func: (platformName) => {
+    func: async (platformName) => {
+      // BOSS 候选人详情可能在 /web/chat/index 内异步渲染，等待简历分节出现。
+      if (platformName === 'boss') {
+        const resumeMarkers = ['个人优势', '工作经历', '项目经历', '教育经历', '技能专长', '求职期望'];
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const renderedText = document.body ? document.body.innerText : '';
+          const markerCount = resumeMarkers.filter(marker => renderedText.includes(marker)).length;
+          if (markerCount >= 2) break;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
       const text = document.body ? document.body.innerText : '';
       const title = document.title || '';
       const url = location.href;
@@ -139,6 +157,15 @@ async function readTab(tabId) {
       if (platformName === 'boss' && parsers.boss && parsers.boss.extractBossSections) {
         structured = parsers.boss.extractBossSections();
       }
+      if (platformName === 'maimai' && parsers.maimai && parsers.maimai.extractMaimaiSections) {
+        structured = parsers.maimai.extractMaimaiSections();
+      }
+      if (platformName === 'liepin' && parsers.liepin && parsers.liepin.extractLiepinSections) {
+        structured = parsers.liepin.extractLiepinSections();
+      }
+      if (platformName === 'ttc' && parsers.ttc && parsers.ttc.extractTtcSections) {
+        structured = parsers.ttc.extractTtcSections();
+      }
 
       return {
         url,
@@ -150,7 +177,8 @@ async function readTab(tabId) {
         captured_at: new Date().toISOString(),
         source_type: 'authorized_batch_browser',
         blocked,
-        empty: !document.body || text.replace(/\s+/g, '').length < 30
+        empty: !document.body || text.replace(/\s+/g, '').length < 30,
+        ready_state: document.readyState
       };
     },
     args: [platform]
@@ -173,9 +201,10 @@ async function captureCurrent() {
   const tabs = await chrome.tabs.query({active: true, currentWindow: true});
   const tab = tabs[0];
   if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) throw new Error('当前不是可收藏网页');
-  // 手动收藏时拦截明显的 BOSS 后台/列表页，避免误入库
+  // 手动收藏时拦截明显的 BOSS 后台/列表页。BOSS 会在聊天页内异步渲染简历，
+  // 因此 /chat/ 不再仅根据 URL 拦截，而是在读取后验证简历分节。
   if (/zhipin\.com/.test(new URL(tab.url).hostname)) {
-    const managementPaths = /\/chat\/|\/manage\/|\/tools\/|\/prop\/|\/vip\/|\/data\/|\/job_list\/| ka=action/;
+    const managementPaths = /\/manage\/|\/tools\/|\/prop\/|\/vip\/|\/data\/|\/job_list\/| ka=action/;
     if (managementPaths.test(tab.url)) {
       throw new Error('当前是 BOSS 后台或列表导航页，请打开单个候选人简历页再收藏');
     }
@@ -183,8 +212,300 @@ async function captureCurrent() {
   const payload = await readTab(tab.id);
   if (payload.blocked) throw new Error('页面要求人工处理：' + payload.blocked);
   if (!payload.text || payload.text.length < 10) throw new Error('当前页面没有足够可见文本');
+  if (/zhipin\.com/.test(new URL(tab.url).hostname) && !hasBossResumeEvidence(payload)) {
+    throw new Error('当前 BOSS 页未检测到已展开的候选人简历，请先打开候选人详情');
+  }
   payload.source_type = 'authorized_visible_page';
   return saveCapture(payload);
+}
+
+function hasBossResumeEvidence(payload) {
+  const markers = ['个人优势', '工作经历', '项目经历', '教育经历', '技能专长', '求职期望'];
+  const sections = payload && payload.structured_data && Array.isArray(payload.structured_data.sections)
+    ? payload.structured_data.sections
+    : [];
+  const sectionHeadings = sections.map(section => String(section.heading || '').replace(/\s+/g, ''));
+  const text = String(payload && payload.text || '');
+  const matched = markers.filter(marker => sectionHeadings.some(heading => heading.startsWith(marker)) || text.includes(marker));
+  return text.replace(/\s+/g, '').length >= 200 && matched.length >= 2;
+}
+
+async function importFeishuCurrent(dryRun = false) {
+  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+  const tab = tabs[0];
+  if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) throw new Error('当前不是可导入网页');
+  const payload = await readTab(tab.id);
+  if (payload.blocked) throw new Error('页面要求人工处理：' + payload.blocked);
+  if (!payload.text || payload.text.length < 10) throw new Error('当前页面没有足够可见文本');
+  if (/zhipin\.com/.test(new URL(tab.url).hostname) && !hasBossResumeEvidence(payload)) {
+    throw new Error('当前 BOSS 页未检测到已展开的候选人简历，请先打开候选人详情');
+  }
+  payload.platform = platformFromUrl(tab.url);
+  payload.source_type = 'browser_capture';
+
+  const response = await fetch(IMPORT_API, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({}, payload, {
+      dry_run: Boolean(dryRun),
+      skip_duplicates: true,
+      check_feishu_exists: false
+    }))
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.error || '飞书导入失败');
+  return data;
+}
+
+async function importFeishuFromPayload(payload) {
+  payload.platform = platformFromUrl(payload.url);
+  payload.source_type = 'browser_capture';
+  const response = await fetch(IMPORT_API, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({}, payload, {
+      dry_run: false,
+      skip_duplicates: true,
+      check_feishu_exists: false
+    }))
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.error || '飞书导入失败');
+  return data;
+}
+
+async function findTtcRecords(tabId, limit) {
+  const results = await chrome.scripting.executeScript({
+    target: {tabId},
+    func: (maxItems) => {
+      const rows = Array.from(document.querySelectorAll('table tbody tr.ant-table-row'));
+      const records = [];
+      const seen = new Set();
+      for (const row of rows) {
+        const reactKey = Object.keys(row).find(k => k.startsWith('__reactFiber'));
+        if (!reactKey) continue;
+        let record = null;
+        let node = row[reactKey];
+        for (let i = 0; i < 30 && node; i++) {
+          if (node.memoizedProps) {
+            if (node.memoizedProps.record) { record = node.memoizedProps.record; break; }
+            if (node.memoizedProps.dataSource && Array.isArray(node.memoizedProps.dataSource)) {
+              const idx = rows.indexOf(row);
+              if (idx >= 0 && node.memoizedProps.dataSource[idx]) {
+                record = node.memoizedProps.dataSource[idx];
+                break;
+              }
+            }
+          }
+          node = node.return;
+        }
+        if (record && record.person_leads_id && !seen.has(record.person_leads_id)) {
+          seen.add(record.person_leads_id);
+          records.push({
+            person_leads_id: record.person_leads_id,
+            displayName: record.displayName || record.cn_name || '',
+            cn_name: record.cn_name || '',
+            rowIndex: rows.indexOf(row)
+          });
+        }
+        if (records.length >= maxItems) break;
+      }
+      return records;
+    },
+    args: [limit]
+  });
+  return results[0].result || [];
+}
+
+async function openTtcCandidateDetail(listTabId, record) {
+  await chrome.scripting.executeScript({
+    target: {tabId: listTabId},
+    func: (personLeadsId, displayName) => {
+      // Find the list component's onOpenDetailPage handler via the first row's React fiber tree.
+      const rows = Array.from(document.querySelectorAll('table tbody tr.ant-table-row'));
+      if (!rows.length) return {ok: false, error: 'no rows'};
+      const row = rows[0];
+      const reactKey = Object.keys(row).find(k => k.startsWith('__reactFiber'));
+      if (!reactKey) return {ok: false, error: 'no react fiber'};
+      let onOpenDetailPage = null;
+      let node = row[reactKey];
+      for (let i = 0; i < 60 && node; i++) {
+        if (node.memoizedProps && node.memoizedProps.onOpenDetailPage) {
+          onOpenDetailPage = node.memoizedProps.onOpenDetailPage;
+          break;
+        }
+        node = node.return;
+      }
+      if (!onOpenDetailPage) return {ok: false, error: 'no onOpenDetailPage'};
+      // Reconstruct a minimal record sufficient for navigation.
+      onOpenDetailPage({person_leads_id: personLeadsId, displayName: displayName});
+      return {ok: true};
+    },
+    args: [record.person_leads_id, record.displayName || record.cn_name || '']
+  });
+}
+
+async function waitForNewDetailTab(listTabId, personLeadsId, timeoutMs = 8000) {
+  const listTab = await chrome.tabs.get(listTabId).catch(() => null);
+  const listWindowId = listTab ? listTab.windowId : null;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tabs = await chrome.tabs.query(listWindowId ? {windowId: listWindowId} : {});
+    const detailTab = tabs.find(t => t.url && t.url.includes(`/app/talent/${personLeadsId}`));
+    if (detailTab && detailTab.id) return detailTab;
+    await sleep(200);
+  }
+  return null;
+}
+
+async function clickTtcNextPage(listTabId) {
+  const results = await chrome.scripting.executeScript({
+    target: {tabId: listTabId},
+    func: () => {
+      const next = document.querySelector('.ant-pagination-next button, .ant-pagination-item-active + .ant-pagination-item, [class*="pagination"] [title="下一页"], [class*="pagination"] [aria-label="Next Page"]');
+      if (!next) return {ok: false, error: 'no next button'};
+      if (next.disabled) return {ok: false, error: 'last page'};
+      next.click();
+      return {ok: true};
+    }
+  });
+  return results[0].result;
+}
+
+async function getTtcCandidateCount(listTabId) {
+  const results = await chrome.scripting.executeScript({
+    target: {tabId: listTabId},
+    func: () => {
+      const match = document.body.innerText.match(/(\d+)\s*个候选人/);
+      return match ? parseInt(match[1], 10) : 0;
+    }
+  });
+  return results[0].result || 0;
+}
+
+async function runTtcBatchImport(limit) {
+  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+  const listTab = tabs[0];
+  if (!listTab || !listTab.id) throw new Error('请先打开 TTC 人才搜索列表页');
+  if (!/app\.ttcadvisory\.com/.test(listTab.url || '')) throw new Error('当前不是 TTC 页面');
+
+  if (!limit || limit <= 0) {
+    limit = await getTtcCandidateCount(listTab.id);
+    if (!limit) limit = 50;
+  }
+
+  const importedIds = new Set();
+  let totalImported = 0;
+  let totalSkipped = 0;
+  let totalErrors = 0;
+  let pageNumber = 1;
+
+  await setState({
+    running: true,
+    total: limit,
+    done: 0,
+    errors: 0,
+    current: '',
+    message: '开始自动导入 TTC 候选人到飞书'
+  });
+
+  while (totalImported + totalSkipped + totalErrors < limit) {
+    const remaining = limit - (totalImported + totalSkipped + totalErrors);
+    const records = await findTtcRecords(listTab.id, remaining);
+    if (!records.length) {
+      // Try to go to next page.
+      const next = await clickTtcNextPage(listTab.id);
+      if (!next.ok) break;
+      pageNumber += 1;
+      await setState(Object.assign({}, await getState(), {
+        current: '',
+        message: '已翻到第 ' + pageNumber + ' 页'
+      }));
+      await sleep(2000);
+      continue;
+    }
+
+    for (const record of records) {
+      if (importedIds.has(record.person_leads_id)) continue;
+      importedIds.add(record.person_leads_id);
+
+      await setState(Object.assign({}, await getState(), {
+        current: record.cn_name,
+        message: '正在打开 ' + record.cn_name
+      }));
+
+      let detailTab;
+      try {
+        await openTtcCandidateDetail(listTab.id, record);
+        detailTab = await waitForNewDetailTab(listTab.id, record.person_leads_id, 10000);
+        if (!detailTab || !detailTab.id) throw new Error('详情页未打开');
+
+        await sleep(2500);
+        const payload = await readTab(detailTab.id);
+        if (payload.blocked) throw new Error('页面要求人工处理：' + payload.blocked);
+        if (!payload.text || payload.text.length < 10) throw new Error('页面文本不足');
+
+        await setState(Object.assign({}, await getState(), {
+          message: '正在导入 ' + record.cn_name
+        }));
+
+        const result = await importFeishuFromPayload(payload);
+        await chrome.tabs.remove(detailTab.id).catch(() => {});
+
+        if (result.action && result.action.includes('duplicate')) {
+          totalSkipped += 1;
+        } else if (result.ok) {
+          totalImported += 1;
+        } else {
+          totalErrors += 1;
+        }
+      } catch (error) {
+        if (detailTab && detailTab.id) await chrome.tabs.remove(detailTab.id).catch(() => {});
+        totalErrors += 1;
+        await setState(Object.assign({}, await getState(), {
+          message: record.cn_name + ' 失败：' + error.message
+        }));
+      }
+
+      await setState(Object.assign({}, await getState(), {
+        done: totalImported,
+        errors: totalErrors,
+        current: record.cn_name,
+        message: '已导入 ' + totalImported + ' / 跳过 ' + totalSkipped + ' / 失败 ' + totalErrors
+      }));
+
+      if (totalImported + totalSkipped + totalErrors >= limit) break;
+      await sleep(2000 + Math.floor(Math.random() * 1500));
+    }
+
+    if (totalImported + totalSkipped + totalErrors >= limit) break;
+
+    // Move to next page after processing current page.
+    const next = await clickTtcNextPage(listTab.id);
+    if (!next.ok) break;
+    pageNumber += 1;
+    await setState(Object.assign({}, await getState(), {
+      message: '已翻到第 ' + pageNumber + ' 页'
+    }));
+    await sleep(2500);
+  }
+
+  await setState({
+    running: false,
+    total: limit,
+    done: totalImported,
+    errors: totalErrors,
+    current: '',
+    message: '完成：导入 ' + totalImported + ' / 跳过 ' + totalSkipped + ' / 失败 ' + totalErrors
+  });
+  return {imported: totalImported, skipped: totalSkipped, errors: totalErrors};
+}
+
+async function startTtcBatchImport(limit) {
+  const state = await getState();
+  if (state.running) throw new Error('已有导入任务正在运行');
+  batchPromise = runTtcBatchImport(limit).finally(() => { batchPromise = null; });
+  return {ok: true, message: '已开始自动导入'};
 }
 
 async function autoScrollList(tabId, maxRounds = 6) {
@@ -226,9 +547,12 @@ async function findCandidateLinks(tabId, limit) {
   else if (platform === 'liepin') parserFiles.push('parsers/liepin.js');
   else parserFiles.push('parsers/generic.js');
 
+  await chrome.scripting.executeScript({
+    target: {tabId},
+    files: parserFiles
+  });
   const results = await chrome.scripting.executeScript({
     target: {tabId},
-    files: parserFiles,
     func: (maxItems, platformName) => {
       const parsers = window.__TTC_PARSERS || {};
       if (platformName === 'boss' && parsers.boss && parsers.boss.findBossCandidateLinks) {
@@ -251,6 +575,7 @@ async function findCandidateLinks(tabId, limit) {
 }
 
 async function runBatch() {
+  let consecutiveErrors = 0;
   while (true) {
     let state = await getState();
     if (!state.running || !state.queue.length) {
@@ -265,6 +590,7 @@ async function runBatch() {
       return;
     }
     const item = state.queue[0];
+    const platform = platformFromUrl(item.url || '');
     state = Object.assign({}, state, {current: item.label || item.url, message: '打开页面'});
     await setState(state);
     let tab;
@@ -275,7 +601,13 @@ async function runBatch() {
         await pauseForHuman(tab, state, '已暂停：页面加载超时，请在打开的页面确认是否需要登录/验证，完成后点“继续当前批次”');
         return;
       }
-      await sleep(3500);
+      // Base wait for DOM, plus extra SPA settle time for Maimai/Liepin.
+      let settleMs = 3500;
+      if (platform === 'maimai' || platform === 'liepin') {
+        settleMs = 5000 + Math.floor(Math.random() * 2000);
+      }
+      await sleep(settleMs);
+
       const payload = await readTab(tab.id);
       if (payload.blocked) {
         await pauseForHuman(tab, state, '已暂停，需要人工处理：' + payload.blocked + '。完成后点“继续当前批次”');
@@ -286,6 +618,7 @@ async function runBatch() {
         return;
       }
       const candidate = await saveCapture(payload);
+      consecutiveErrors = 0;
       const latest = await getState();
       state = Object.assign({}, latest, {
         queue: latest.queue.slice(1),
@@ -297,14 +630,19 @@ async function runBatch() {
       await chrome.tabs.remove(tab.id);
     } catch (error) {
       if (tab && tab.id) await chrome.tabs.remove(tab.id).catch(() => {});
+      consecutiveErrors += 1;
       const latest = await getState();
       state = Object.assign({}, latest, {
         queue: latest.queue.slice(1),
         errors: (latest.errors || 0) + 1,
         current: item.label || item.url,
-        message: '跳过：' + error.message
+        message: '跳过（' + consecutiveErrors + ' 次连续失败）：' + error.message
       });
       await setState(state);
+      if (consecutiveErrors >= 3) {
+        await pauseForHuman(null, state, '已暂停：连续 3 次读取失败，请检查页面是否改版或触发风控');
+        return;
+      }
     }
     const latest = await getState();
     if (!latest.running) return;
@@ -532,6 +870,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'captureCurrent') {
       const candidate = await captureCurrent();
       return {ok: true, candidate};
+    }
+    if (message.type === 'importFeishu') {
+      const result = await importFeishuCurrent(Boolean(message.dryRun));
+      return Object.assign({ok: Boolean(result.ok)}, result);
+    }
+    if (message.type === 'autoImportCurrentDetail') {
+      const result = await importFeishuCurrent(false);
+      return Object.assign({ok: Boolean(result.ok)}, result);
+    }
+    if (message.type === 'startTtcBatchImport') {
+      return await startTtcBatchImport(message.limit || 50);
     }
     if (message.type === 'ping') {
       return {ok: true, version: EXTENSION_VERSION};

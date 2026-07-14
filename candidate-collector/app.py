@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import urllib.error
@@ -24,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from image_processing.ocr import ocr_pdf
+from ingestion.browser_capture import BrowserCapturePayload, import_browser_capture
 from ingestion.pipeline import ingest_file, ingest_text
 from ingestion.review import approve_record as review_approve_record
 from ingestion.review import reject_record as review_reject_record
@@ -124,6 +126,9 @@ class IngestFilePayload(BaseModel):
     dry_run: bool = True
     skip_duplicates: bool = True
     check_feishu_exists: bool = False
+    source_platform: str | None = Field(default=None, max_length=40)
+    source_url: str | None = Field(default=None, max_length=2000)
+    source_extra: dict[str, Any] | None = None
 
 
 class IngestTextPayload(BaseModel):
@@ -136,6 +141,22 @@ class IngestTextPayload(BaseModel):
 class IngestFromUrlPayload(BaseModel):
     url: str = Field(min_length=10, max_length=2000)
     dry_run: bool = True
+
+
+class BrowserCaptureImportPayload(BaseModel):
+    """Payload from the extension for direct Feishu Base import."""
+
+    url: str = ""
+    title: str = ""
+    heading: str = ""
+    text: str = Field(min_length=10, max_length=600_000)
+    platform: str = ""
+    source_type: str = "browser_capture"
+    captured_at: str | None = None
+    structured_data: dict[str, Any] | None = None
+    dry_run: bool = False
+    skip_duplicates: bool = True
+    check_feishu_exists: bool = False
 
 
 class SearchPayload(BaseModel):
@@ -651,6 +672,18 @@ def save_candidate(payload: CapturePayload, attachment_path: str | None = None) 
         )
         conn.commit()
         row = conn.execute("SELECT * FROM candidates WHERE fingerprint=?", (fingerprint,)).fetchone()
+
+    # 云端同步：失败不阻塞本地入库
+    try:
+        from cloud_sync.client import CloudSyncClient
+        from cloud_sync.config import rds_configured
+        from cloud_sync.transform import sqlite_row_to_cloud
+
+        if rds_configured():
+            CloudSyncClient().upsert_candidates([sqlite_row_to_cloud(row)])
+    except Exception as exc:
+        logging.getLogger(__name__).warning(f"cloud sync failed: {exc}")
+
     return row_to_dict(row)
 
 
@@ -905,6 +938,20 @@ def capture(payload: CapturePayload) -> dict[str, Any]:
     return {"ok": True, "candidate": save_candidate(payload)}
 
 
+@app.post("/api/import-browser-capture")
+def import_browser_capture_endpoint(payload: BrowserCaptureImportPayload) -> dict[str, Any]:
+    """Direct Feishu Base import for browser extension captures.
+
+    Unlike ``/api/capture`` this endpoint writes directly to the configured
+    Feishu Base (using ``FeishuBaseAdapter``) and returns the Feishu record ID
+    on success. It also records the attempt in ``ingestion_log``.
+    """
+    result = import_browser_capture(
+        BrowserCapturePayload(**payload.model_dump()),
+    )
+    return {"ok": result.get("ok", False), **result}
+
+
 @app.post("/api/feishu-web/message")
 def feishu_web_message(payload: FeishuWebMessagePayload) -> dict[str, Any]:
     saved = save_feishu_web_message(payload)
@@ -1087,6 +1134,9 @@ def ingest_v2_file(payload: IngestFilePayload) -> dict[str, Any]:
         dry_run=payload.dry_run,
         skip_duplicates=payload.skip_duplicates,
         check_feishu_exists=payload.check_feishu_exists,
+        source_platform=payload.source_platform,
+        source_url=payload.source_url,
+        source_extra=payload.source_extra,
     )
 
 
@@ -1510,3 +1560,70 @@ def quality_trend(days: int = Query(default=30, ge=1, le=90)) -> dict[str, Any]:
             """,
         ).fetchall()
     return {"ok": True, "trend": [dict(r) for r in rows]}
+
+
+# ── Cloud RDS unified query API ─────────────────────────────────────
+
+@app.get("/api/cloud/candidates")
+def cloud_candidates(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
+    """Return recent candidates from the cloud RDS MySQL instance."""
+    try:
+        from cloud_sync.client import CloudSyncClient
+        from cloud_sync.config import rds_configured
+    except ImportError:
+        return {"ok": False, "error": "cloud_sync module not available"}
+    if not rds_configured():
+        return {"ok": False, "error": "RDS not configured"}
+    client = CloudSyncClient()
+    return {"ok": True, "candidates": client.list_recent_candidates(limit)}
+
+
+@app.get("/api/cloud/search")
+def cloud_search(
+    q: str = Query(..., description="搜索关键词"),
+    project_id: str = Query(default="ttc"),
+    limit: int = Query(default=10, ge=1, le=100),
+) -> dict[str, Any]:
+    """Keyword search across cloud candidates and memories."""
+    try:
+        from cloud_sync.client import get_conn
+        from cloud_sync.config import rds_configured
+    except ImportError:
+        return {"ok": False, "error": "cloud_sync module not available"}
+    if not rds_configured():
+        return {"ok": False, "error": "RDS not configured"}
+
+    results = {"candidates": [], "memories": []}
+    like = f"%{q}%"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT fingerprint, name, current_company, current_role,
+                       LEFT(raw_text, 300) AS raw_text
+                FROM cloud_candidates
+                WHERE raw_text LIKE %s OR name LIKE %s OR current_company LIKE %s
+                ORDER BY collected_at DESC
+                LIMIT %s
+                """,
+                (like, like, like, limit),
+            )
+            cols = [d[0] for d in cur.description]
+            results["candidates"] = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+            cur.execute(
+                """
+                SELECT source, content_type, LEFT(content_text, 400) AS content_text,
+                       metadata, created_at
+                FROM memories
+                WHERE project_id = %s AND content_text LIKE %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (project_id, like, limit),
+            )
+            cols = [d[0] for d in cur.description]
+            results["memories"] = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    return {"ok": True, "q": q, **results}
+

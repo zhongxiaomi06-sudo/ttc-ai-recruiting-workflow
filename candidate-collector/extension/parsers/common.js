@@ -22,7 +22,8 @@ export const CANDIDATE_EVIDENCE = /(\d+\s*岁|\d+\s*年|本科|硕士|博士|大
 
 export const SUPPORTED_HOSTS = [
   'zhipin.com', 'liepin.com', 'maimai.cn',
-  'linkedin.com', '51job.com', 'zhaopin.com'
+  'linkedin.com', '51job.com', 'zhaopin.com',
+  'app.ttcadvisory.com'
 ];
 
 export function supportedHost(url) {
@@ -93,6 +94,7 @@ export function platformFromUrl(url) {
     if (host.includes('linkedin.com')) return 'linkedin';
     if (host.includes('51job.com')) return '51job';
     if (host.includes('zhaopin.com')) return 'zhaopin';
+    if (host.includes('app.ttcadvisory.com')) return 'ttc';
   } catch {
     return 'generic';
   }
