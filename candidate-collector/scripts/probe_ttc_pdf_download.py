@@ -12,8 +12,9 @@ from playwright.async_api import async_playwright
 for _proxy_var in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
     os.environ.pop(_proxy_var, None)
 
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODgxMDI4OTMsImlhdCI6MTc4MjkxODg5MywiQ3VzdG9tRGF0YSI6eyJuaWNrX25hbWUiOiJNaWEg6ZKf56yR5ZKqIiwidXNlcl91bmlxdWVfaWQiOiJVMjA3MTU4NTk4NzQ0MDM5ODMzNiIsInJvbGVfdW5pcXVlX2lkIjoiIiwiYmVsb25nX3RvX3R0YyI6dHJ1ZSwib3Blbl9pZCI6Im91X2QyZTM3MWYwMTQyYWQ2MDAyZDhiZDNjZGJlY2NhM2NkIiwidW5pb25faWQiOiJvbl9kYmM5MWRiOGFlNmQ3MWEwN2Y0NzkyYjhkM2JhODkxNSIsInRhbGVudF9pZCI6IjEyODM1YjgwN2UwZjU3NDAiLCJ0aGlyZF9iaW5kX3BsYXRmb3JtIjoiRkVJU0hVIiwiZXh0ZXJuYWwiOmZhbHNlfX0.Jm1wP676-XMUHDoHA38gYoLtX3Jllkvo4nAnUz4xFM0"
-PID = "PL2026640500396716032"
+# TOKEN 走环境变量,禁止硬编码进仓库(此前硬编码的 JWT 已泄露,务必轮换)。
+TOKEN = os.environ.get("TTC_JWT_TOKEN", "")
+PID = os.environ.get("TTC_PROBE_PID", "PL2026640500396716032")
 
 
 async def main():

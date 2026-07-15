@@ -20,8 +20,11 @@ def _parse_timestamp(value: str | None) -> datetime | None:
             return None
 
 
-def sqlite_row_to_cloud(row: sqlite3.Row) -> dict[str, Any]:
+def sqlite_row_to_cloud(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     """Convert a local candidates SQLite row into the cloud_candidates schema."""
+    # sqlite3.Row 没有 .get()，先统一转成 dict（调用方可能传 Row 或 dict）。
+    if isinstance(row, sqlite3.Row):
+        row = dict(row)
     collected_at = _parse_timestamp(row.get("collected_at"))
 
     # Preserve every local column in parsed_json so nothing is lost.

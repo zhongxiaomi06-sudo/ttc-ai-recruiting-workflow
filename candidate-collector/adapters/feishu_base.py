@@ -40,7 +40,14 @@ class FeishuBaseAdapter:
     ):
         self.mapping_path = Path(mapping_path) if mapping_path else MAPPING_PATH
         self.mapping = json.loads(self.mapping_path.read_text(encoding="utf-8"))
-        self.base_token = base_token or self.mapping["base_token"]
+        # base_token 优先级: 显式传参 > 环境变量 TTC_FEISHU_BASE_TOKEN > 配置文件。
+        # 配置文件里只允许放占位符,真实 token 一律走 .env(禁止硬编码进仓库)。
+        self.base_token = (
+            base_token
+            or os.getenv("TTC_FEISHU_BASE_TOKEN")
+            or os.getenv("FEISHU_BASE_TOKEN")
+            or self.mapping["base_token"]
+        )
         self.table_id = table_id or self.mapping["table_id"]
 
     def _field_value(self, record: CandidateRecord, spec: dict[str, Any]) -> Any:

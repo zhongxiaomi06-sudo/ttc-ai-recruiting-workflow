@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
+import secrets
 import sqlite3
 import urllib.error
 import urllib.parse
@@ -191,13 +193,33 @@ class ReviewRejectPayload(BaseModel):
 
 
 app = FastAPI(title="TTC 候选人数据收藏器", version="0.1.0")
+
+# --- 本地 API 加固 ---
+# 1) CORS: 默认 *(向后兼容浏览器扩展),可用 TTC_CORS_ORIGINS 收敛,例如
+#    "chrome-extension://<扩展ID>,http://127.0.0.1:8765"。
+# 2) 写操作鉴权: 设置 TTC_LOCAL_API_TOKEN 后,所有 POST/PUT/DELETE 必须带
+#    请求头 X-TTC-Token; 未设置则保持开放但启动时打印告警。
+_CORS_ORIGINS = [o.strip() for o in os.getenv("TTC_CORS_ORIGINS", "*").split(",") if o.strip()]
+_LOCAL_API_TOKEN = os.getenv("TTC_LOCAL_API_TOKEN", "")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS or ["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _local_api_token_guard(request: Request, call_next):
+    if _LOCAL_API_TOKEN and request.method in {"POST", "PUT", "DELETE", "PATCH"}:
+        token = request.headers.get("x-ttc-token", "")
+        if not secrets.compare_digest(token, _LOCAL_API_TOKEN):
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "缺少或错误的 X-TTC-Token"}, status_code=401)
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
 
