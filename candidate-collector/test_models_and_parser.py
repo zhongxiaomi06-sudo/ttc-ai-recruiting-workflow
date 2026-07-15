@@ -3,7 +3,7 @@ from pathlib import Path
 
 from models import CandidateRecord
 from adapters.feishu_base import FeishuBaseAdapter
-from parsers.unified_parser import _extract_experiences, _extract_name, parse_resume_file, parse_resume_text
+from parsers.unified_parser import _clean_text, _extract_experiences, _extract_name, parse_resume_file, parse_resume_text
 
 
 RESUME_DIR = Path(__file__).resolve().parent.parent / "简历数据"
@@ -133,6 +133,64 @@ class ExperienceExtractionTests(unittest.TestCase):
         self.assertEqual(len(experiences), 1)
         self.assertEqual(experiences[0].company, "字节跳动")
         self.assertEqual(experiences[0].role, "后端开发工程师")
+
+    def test_clean_text_strips_ui_chrome(self):
+        text = "张三\n展开\nTA有13个好友在此公司\n该段经历来自附件简历\n备注（0）\n本科"
+        cleaned = _clean_text(text)
+        self.assertIn("张三", cleaned)
+        self.assertIn("本科", cleaned)
+        self.assertNotIn("展开", cleaned)
+        self.assertNotIn("好友在此公司", cleaned)
+        self.assertNotIn("该段经历来自附件简历", cleaned)
+        self.assertNotIn("备注", cleaned)
+
+    def test_maimai_header_not_misread_as_name(self):
+        text = """基础信息
+本科
+工作经历
+测试科技有限公司
+销售总监
+2020-01至2024-12
+1、负责全国销售工作；
+教育经历
+测试大学
+本科，计算机
+2010-09至2014-06
+"""
+        record = parse_resume_text(text, source_type="browser_capture")
+        # 脉脉的"基础信息"/"本科"/"销售总监"都不是姓名。
+        self.assertNotEqual(record.name, "基础信息")
+        self.assertNotEqual(record.name, "本科")
+        self.assertNotEqual(record.name, "销售总监")
+
+    def test_attachment_boilerplate_not_in_company(self):
+        text = """工作经历
+该段经历来自附件简历
+加多宝（天津）饮料有限公司
+区域销售管理主管
+2022-08至2023-06
+负责渠道管理
+"""
+        experiences, _ = _extract_experiences(_clean_text(text))
+        self.assertEqual(len(experiences), 1)
+        self.assertEqual(experiences[0].company, "加多宝（天津）饮料有限公司")
+
+    def test_duplicate_panels_deduplicated(self):
+        text = """工作经历
+云杉网络有限公司
+销售总监
+2020-01至2024-12
+1、负责全国销售工作；
+该段经历来自附件简历
+云杉网络有限公司
+销售总监
+2020-01至2024-12
+1、负责全国销售工作；
+"""
+        experiences, _ = _extract_experiences(_clean_text(text))
+        self.assertEqual(len(experiences), 1)
+        self.assertEqual(experiences[0].company, "云杉网络有限公司")
+        self.assertEqual(experiences[0].role, "销售总监")
 
 
 class RealPdfRegressionTests(unittest.TestCase):

@@ -85,6 +85,20 @@ RESPONSIBILITY_PREFIX_RE = re.compile(
     r"证据|依据|参考|说明|备注|注释|反馈|评价|评分|排名|榜单)"
 )
 
+# UI chrome / boilerplate full-line labels leaked from recruiting-site pages
+# (BOSS 直聘, 脉脉). These never appear as a standalone line in a real resume,
+# so dropping them keeps them out of name/company/experience extraction and
+# out of raw_text.
+NOISE_LINE_EXACT = {
+    "展开", "收起", "加载更多", "查看更多", "展开全部",
+    "该段经历来自附件简历",
+    "人才已投递职位，期待处理：",
+    "快捷回复", "通过初筛", "不合适", "下载在线简历", "转发给同事",
+    "加好友", "加入储备", "特别关注", "加入其他职位", "查看邮箱",
+    "请输入备注内容", "暂无备注内容", "正在写入云端人才库…",
+}
+NOISE_LINE_RE = re.compile(r"^(?:[Tt][Aa]有\d+个好友在此(?:公司|学校)|备注（\d+）)$")
+
 
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -139,6 +153,9 @@ def _clean_text(text: str) -> str:
         line = re.sub(r"\s+", " ", raw).strip()
         if not line:
             continue
+        # Drop recruiting-site UI chrome / boilerplate (BOSS, 脉脉).
+        if line in NOISE_LINE_EXACT or NOISE_LINE_RE.match(line):
+            continue
         # Drop consecutive duplicates only; preserve repeated fragments such as
         # "科技有限公司" that appear under multiple work experiences.
         if lines and line == lines[-1]:
@@ -168,12 +185,20 @@ def _extract_name(text: str, filename: str = "") -> str | None:
     if m and m.group(1) not in NAME_STOP_WORDS:
         return m.group(1)
     # Look for a standalone 2-4 character Chinese name near the top.
-    stop = {"在线简历", "个人简历", "简历", "基本信息", "工作经历", "教育经历", "项目经历", "求职意向", "个人优势"}
+    stop = {"在线简历", "个人简历", "简历", "基本信息", "基础信息", "工作经历", "教育经历",
+            "项目经历", "求职意向", "求职期望", "个人优势", "职业标签", "更多资料", "实名动态",
+            "自我评价", "技能专长",
+            # Degree words appear on their own line on 脉脉 (e.g. "基础信息 / 本科").
+            "本科", "硕士", "博士", "大专", "专科", "研究生", "学士", "高中", "中专"}
     for line in text.splitlines()[:30]:
         line = line.strip()
         if line in stop:
             continue
         if re.fullmatch(r"[一-鿿·]{2,4}", line):
+            # A bare 2-4 char line is a name only if it isn't a section header,
+            # degree, role, or company-ish token (脉脉 puts "本科"/"销售总监" here).
+            if ROLE_KEYWORDS_RE.search(line) or INVALID_COMPANY_RE.search(line):
+                continue
             return line
         # Name followed by " 男 28岁" etc. Require at least one digit so plain
         # 2-4 character lines are not mis-identified as names.
@@ -341,12 +366,20 @@ def _extract_experiences(text: str) -> tuple[list[WorkExperience], float]:
                     continue
                 i += 1
 
+    # Deduplicate identical entries: recruiting pages repeat the same block in
+    # multiple panels, which otherwise yields duplicate experiences.
+    seen: set[tuple[str, str, str]] = set()
+    unique_entries: list[WorkExperience] = []
+    for e in entries:
+        key = (e.company, e.role, e.period)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_entries.append(e)
+
     # Aggregate confidence for work experience extraction.
-    if entries:
-        confidence = 0.9 if len(entries) >= 1 else 0.7
-    else:
-        confidence = 0.0
-    return entries[:10], confidence
+    confidence = 0.9 if unique_entries else 0.0
+    return unique_entries[:10], confidence
 
 
 def _extract_education(text: str) -> Education | None:
