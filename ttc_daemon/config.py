@@ -63,7 +63,7 @@ FEISHU_BOT_CONFIG = {
 # 飞书人才库搜索配置
 FEISHU_BASE_CONFIG = {
     "enabled": os.getenv("TTC_FEISHU_BASE_ENABLED", "false").lower() == "true",
-    "base_token": os.getenv("TTC_FEISHU_BASE_TOKEN", "DIIdbR2c8ax8bTsZoNKcnX6enSe"),
+    "base_token": os.getenv("TTC_FEISHU_BASE_TOKEN", ""),
     "table_id": os.getenv("TTC_FEISHU_BASE_TABLE_ID", "tblWFuBQrPmllE9W"),
     "view_id": os.getenv("TTC_FEISHU_BASE_VIEW_ID", "vewhTzpFAm"),
     "mapping_path": os.getenv(

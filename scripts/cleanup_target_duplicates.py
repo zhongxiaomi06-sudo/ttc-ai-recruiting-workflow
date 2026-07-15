@@ -12,7 +12,7 @@ from typing import Any
 
 import argparse
 
-BASE_TOKEN = "DIIdbR2c8ax8bTsZoNKcnX6enSe"
+BASE_TOKEN = ""
 TABLE_ID = "tblWFuBQrPmllE9W"
 
 

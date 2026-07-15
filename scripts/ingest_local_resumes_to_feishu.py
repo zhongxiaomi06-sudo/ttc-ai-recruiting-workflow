@@ -38,7 +38,7 @@ from models import CandidateRecord
 from parsers.unified_parser import parse_resume_file
 
 
-DEFAULT_SOURCE_BASE_TOKEN = "DIIdbR2c8ax8bTsZoNKcnX6enSe"
+DEFAULT_SOURCE_BASE_TOKEN = ""
 DEFAULT_SOURCE_TABLE_ID = "tblyT3bebRJsyHar"
 DEFAULT_SOURCE_VIEW_ID = "vewirJbTf2"
 

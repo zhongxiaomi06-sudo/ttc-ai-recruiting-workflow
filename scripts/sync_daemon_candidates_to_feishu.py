@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from ttc_daemon import db as local_db
 
-DEFAULT_BASE_TOKEN = "DIIdbR2c8ax8bTsZoNKcnX6enSe"
+DEFAULT_BASE_TOKEN = ""
 DEFAULT_TABLE_ID = "tblyT3bebRJsyHar"  # "正式版-简历解析"
 
 DATA_DIR = REPO_ROOT / "data" / "sync_feishu"

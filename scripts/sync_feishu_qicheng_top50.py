@@ -9,7 +9,7 @@
 用法：
     candidate-collector/.venv/bin/python scripts/sync_feishu_qicheng_top50.py \
         --input data/qicheng_feishu_match/qicheng_top50.json \
-        --base-token DIIdbR2c8ax8bTsZoNKcnX6enSe \
+        --base-token <your-feishu-base-token> \
         --table-id tblWFuBQrPmllE9W
 """
 
@@ -140,7 +140,7 @@ def update_record(
 def main() -> int:
     parser = argparse.ArgumentParser(description="同步启承资本 Top50 匹配结果回飞书")
     parser.add_argument("--input", default=str(REPO_ROOT / "data" / "qicheng_feishu_match" / "qicheng_top50.json"))
-    parser.add_argument("--base-token", default="DIIdbR2c8ax8bTsZoNKcnX6enSe")
+    parser.add_argument("--base-token", default="")
     parser.add_argument("--table-id", default="tblWFuBQrPmllE9W")
     parser.add_argument("--dry-run", action="store_true", help="只打印，不写入")
     args = parser.parse_args()
