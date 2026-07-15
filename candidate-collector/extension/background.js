@@ -3,14 +3,9 @@ const IMPORT_API = 'http://127.0.0.1:8765/api/import-browser-capture';
 const LOCAL_IMPORT_API = 'http://127.0.0.1:8765/api/import-local-download';
 const EXTENSION_VERSION = '0.4.0';
 
-import { detectRisk, platformFromUrl, supportedHost as importedSupportedHost } from './parsers/common.js';
+import { detectRisk, platformFromUrl, supportedHost } from './parsers/common.js';
 import { validatePayload } from './validation.js';
 
-
-const SUPPORTED = [
-  'zhipin.com', 'liepin.com', 'maimai.cn',
-  'linkedin.com', '51job.com', 'zhaopin.com'
-];
 let batchPromise = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -18,21 +13,6 @@ const getState = () => chrome.storage.local.get('batch').then(data => data.batch
   running: false, queue: [], total: 0, done: 0, errors: 0, current: '', message: '空闲'
 });
 const setState = state => chrome.storage.local.set({batch: state}).then(() => state);
-const RISK_WORDS = [
-  '安全验证', '请输入验证码', '访问过于频繁', '操作过于频繁',
-  '异常访问', '请完成验证', '登录后查看', '账号登录', '登录后使用',
-  '请登录', '滑块验证', '人机验证', '验证身份', '访问验证',
-  'captcha', 'verify you are human'
-];
-const NON_CANDIDATE_LABELS = [
-  '桌面客户端', '下载APP', '下载 App', '下载客户端', '手机扫码',
-  '打开APP', '打开 App', '登录', '注册', '帮助中心', '隐私政策',
-  '用户协议', '职位管理', '招聘者', '企业服务'
-];
-
-function supportedHost(url) {
-  return importedSupportedHost(url);
-}
 
 function waitForTab(tabId, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
@@ -69,15 +49,6 @@ async function waitForTabSoft(tabId, timeoutMs = 35000) {
     }
     throw error;
   }
-}
-
-function looksLikeNonCandidateLabel(label) {
-  const text = (label || '').replace(/\s+/g, '');
-  return !text || NON_CANDIDATE_LABELS.some(word => text.includes(word.replace(/\s+/g, '')));
-}
-
-function looksLikeCandidateText(text) {
-  return /(\d+\s*岁|\d+\s*年|本科|硕士|博士|大专|统招|在职|离职|求职|期望|工作经历|教育经历|咨询|战略|品牌|产品|渠道|运营|市场|经理|总监|负责人)/.test(text || '');
 }
 
 async function pauseForHuman(tab, state, message) {
@@ -230,19 +201,9 @@ function hasBossResumeEvidence(payload) {
   return text.replace(/\s+/g, '').length >= 200 && matched.length >= 2;
 }
 
-async function importFeishuCurrent(dryRun = false) {
-  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-  const tab = tabs[0];
-  if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) throw new Error('当前不是可导入网页');
-  const payload = await readTab(tab.id);
-  if (payload.blocked) throw new Error('页面要求人工处理：' + payload.blocked);
-  if (!payload.text || payload.text.length < 10) throw new Error('当前页面没有足够可见文本');
-  if (/zhipin\.com/.test(new URL(tab.url).hostname) && !hasBossResumeEvidence(payload)) {
-    throw new Error('当前 BOSS 页未检测到已展开的候选人简历，请先打开候选人详情');
-  }
-  payload.platform = platformFromUrl(tab.url);
+async function postImport(payload, dryRun) {
+  payload.platform = platformFromUrl(payload.url);
   payload.source_type = 'browser_capture';
-
   const response = await fetch(IMPORT_API, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -257,21 +218,17 @@ async function importFeishuCurrent(dryRun = false) {
   return data;
 }
 
-async function importFeishuFromPayload(payload) {
-  payload.platform = platformFromUrl(payload.url);
-  payload.source_type = 'browser_capture';
-  const response = await fetch(IMPORT_API, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(Object.assign({}, payload, {
-      dry_run: false,
-      skip_duplicates: true,
-      check_feishu_exists: false
-    }))
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || data.error || '飞书导入失败');
-  return data;
+async function importFeishuCurrent(dryRun = false) {
+  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+  const tab = tabs[0];
+  if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) throw new Error('当前不是可导入网页');
+  const payload = await readTab(tab.id);
+  if (payload.blocked) throw new Error('页面要求人工处理：' + payload.blocked);
+  if (!payload.text || payload.text.length < 10) throw new Error('当前页面没有足够可见文本');
+  if (/zhipin\.com/.test(new URL(tab.url).hostname) && !hasBossResumeEvidence(payload)) {
+    throw new Error('当前 BOSS 页未检测到已展开的候选人简历，请先打开候选人详情');
+  }
+  return postImport(payload, dryRun);
 }
 
 async function findTtcRecords(tabId, limit) {
@@ -449,7 +406,7 @@ async function runTtcBatchImport(limit) {
           message: '正在导入 ' + record.cn_name
         }));
 
-        const result = await importFeishuFromPayload(payload);
+        const result = await postImport(payload, false);
         await chrome.tabs.remove(detailTab.id).catch(() => {});
 
         if (result.action && result.action.includes('duplicate')) {

@@ -2,21 +2,10 @@
  * Generic fallback parser for supported recruiting sites.
  */
 
-import { candidateUrlFrom, looksLikeCandidateText, looksLikeNonCandidateLabel, normalizeUrl } from './common.js';
+import { candidateUrlFrom, looksLikeCandidateText, looksLikeNonCandidateLabel, makeLinkCollector, CARD_SELECTORS } from './common.js';
 
 export function findGenericCandidateLinks(maxItems) {
-  const seen = new Map();
-  const add = (url, label, score) => {
-    if (!url) return;
-    const clean = normalizeUrl(url, location.href);
-    if (!clean || clean === location.href) return;
-    const compactLabel = (label || '').replace(/\s+/g, '');
-    const negativeLabel = /(桌面客户端|下载APP|下载App|下载客户端|打开APP|打开App|登录|注册|帮助|隐私|协议|企业服务|职位管理|招聘者)/;
-    const negativeUrl = /(download|desktop|client|app-download|appdownload|login|register|privacy|terms|help|about|contact|company|job\/detail|chat|message|setting|job_list|app\.html|\/app\/)/i;
-    if (negativeLabel.test(compactLabel) || negativeUrl.test(clean)) return;
-    const old = seen.get(clean);
-    if (!old || score > old.score) seen.set(clean, {url: clean, label: String(label || clean).slice(0, 80), score});
-  };
+  const {add, links} = makeLinkCollector();
 
   const positive = /(geek|candidate|resume|talent|recommend|jobhunter|profile|user|resume-detail|cview|resumeview)/i;
   const evidence = /(\d+\s*岁|\d+\s*年|本科|硕士|博士|咨询|战略|品牌|产品|渠道)/;
@@ -37,13 +26,7 @@ export function findGenericCandidateLinks(maxItems) {
     add(href, text || cardText.slice(0, 80), score);
   }
 
-  const cardSelectors = [
-    '[class*=candidate]', '[class*=resume]', '[class*=geek]', '[class*=talent]',
-    '[class*=jobhunter]', '[class*=recommend]', '[class*=profile]', '[class*=person]',
-    '[class*=user]', '[class*=card]', '[class*=item]', '[role=link]', '[data-url]',
-    '[data-href]', '[data-link]', '[data-path]'
-  ];
-  const cards = Array.from(document.querySelectorAll(cardSelectors.join(','))).slice(0, 300);
+  const cards = Array.from(document.querySelectorAll(CARD_SELECTORS)).slice(0, 300);
   for (const card of cards) {
     const cardText = (card.innerText || card.textContent || '').replace(/\s+/g, ' ').trim();
     if (cardText.length < 8 || cardText.length > 2500) continue;
@@ -59,7 +42,7 @@ export function findGenericCandidateLinks(maxItems) {
     add(href, cardText.slice(0, 80), score);
   }
 
-  return Array.from(seen.values()).sort((a, b) => b.score - a.score).slice(0, maxItems);
+  return links(maxItems);
 }
 
 if (typeof window !== 'undefined') {
